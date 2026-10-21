@@ -438,3 +438,9 @@ body.sheet-open #view { overflow: hidden; }
 .scan-line { position: absolute; left: 10%; right: 10%; top: 50%; height: 2px; background: var(--red); box-shadow: 0 0 12px var(--red); animation: scan 1.8s ease-in-out infinite alternate; }
 @keyframes scan { from { transform: translateY(-50px); } to { transform: translateY(50px); } }
 .tab-lbl { font-size: 10.5px; }
+.pill.tiny.warn { background: rgba(255, 214, 10, .16); color: var(--yellow); }
+.pill.tiny.train { background: rgba(48, 209, 88, .18); color: var(--green); }
+.steps-card .title-s { display: flex; align-items: center; gap: 8px; font-size: 22px; }
+.steps-card .bar-track { height: 6px; }
+.row.gap-s { display: flex; gap: 6px; }
+.warn-text { color: var(--yellow); }

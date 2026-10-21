@@ -7,7 +7,7 @@ import { renderProgress } from './progress.js';
 import { renderBody } from './body.js';
 import { maybeOnboard } from './onboarding.js';
 import { renderNutrition, targetsSheet } from './nutrition.js';
-import { nTotals, kcalTarget, isTrainingDay, mealFor, nDay, putNDay } from './store.js';
+import { nTotals, kcalTarget, isTrainingDay, mealFor, nDay, putNDay, parseSteps, setSteps, LOW_STEPS } from './store.js';
 
 export const app = { tab: 'home', go, refresh: () => render(true) };
 window.__lift = { S, app };
@@ -252,13 +252,31 @@ export function backupSheet() {
 }
 
 // ───────────────────────── Boot
+// Apple Health steps via iOS Shortcut: #steps?date=YYYY-MM-DD&n=1234 — hash only, so nothing reaches any server.
+async function handleStepsHash() {
+  if (!/^#steps\b/i.test(location.hash)) return false;
+  const rows = parseSteps(decodeURIComponent(location.hash));
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!rows.length) { toast('Steps link not understood — expected #steps?date=YYYY-MM-DD&n=1234'); return false; }
+  for (const [d, n] of rows) await setSteps(d, n, 'shortcut');
+  const [d, n] = rows[rows.length - 1];
+  app.nutDay = d; app.nutSeg = 'today'; go('nutrition', { force: true });
+  haptic('success');
+  toast(rows.length > 1 ? `Saved steps for ${rows.length} days` : `Saved ${n.toLocaleString()} steps for ${new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}${n < LOW_STEPS ? ' · low-step day' : ''}`, { icon: 'check' });
+  if (!navigator.standalone && !matchMedia('(display-mode: standalone)').matches && /iPhone|iPad/.test(navigator.userAgent))
+    setTimeout(() => toast('Heads up: this opened in Safari, which keeps separate data from the Home Screen app. Use the webapp:// link in the Shortcut.'), 2600);
+  return true;
+}
+
 async function boot() {
   const root = $('#app');
   root.append(h('main', { id: 'view' }), tabbar(), h('div', { id: 'toasts' }));
   await load();
   try { navigator.storage?.persist?.(); } catch {}
-  render();
+  const fromShortcut = await handleStepsHash();
+  if (!fromShortcut) render();
   maybeOnboard();
+  window.addEventListener('hashchange', () => handleStepsHash());
   document.addEventListener('visibilitychange', () => { if (!document.hidden && app.tab === 'home') { derive(); render(true); } });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     const had = !!navigator.serviceWorker.controller;

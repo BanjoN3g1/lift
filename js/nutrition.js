@@ -1,7 +1,7 @@
 // Nutrition tab: daily log, quick add, favorites, food search (bundled USDA FNDDS + optional Open Food Facts),
 // barcode scan, drinks, history. All logs stay in IndexedDB on this device.
 import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, segmented, toggle, ring, barChart } from './ui.js';
-import { S, saveSettings, nDay, putNDay, nTotals, isTrainingDay, kcalTarget, mealFor, today, U } from './store.js';
+import { S, saveSettings, nDay, putNDay, nTotals, isTrainingDay, kcalTarget, mealFor, today, U, stepsFor, setSteps, parseSteps, LOW_STEPS } from './store.js';
 import * as E from './engine.js';
 import { app } from './app.js';
 
@@ -128,6 +128,7 @@ function dayView(body, k) {
     macroBar('Fat', tot.f, tgt.fatMin, 'g', null, '#FFD60A', 'min'),
     macroBar('Fiber', tot.fb, tgt.fiber, 'g', null, '#64D2FF'),
     h('div', { class: 'row-between muted tiny' }, h('span', null, `Carbs ${r0(tot.c)} g`), tot.al ? h('span', null, `Alcohol ${r1(tot.al)} g · ${r0(tot.al * 7)} kcal`) : null)));
+  body.append(stepsCard(k));
   // Quick add + actions
   body.append(h('section', { class: 'card' },
     h('div', { class: 'eyebrow' }, 'Quick add'),
@@ -186,6 +187,39 @@ async function addEntries(k, items, { toast: msg } = {}) {
   await putNDay(d); haptic('success');
   if (msg) toast(msg, { icon: 'check' });
   rerender();
+}
+
+// ───────────────────────── Steps (Apple Health via iOS Shortcut, or typed)
+const fmtN = (n) => Math.round(n).toLocaleString();
+function stepsCard(k) {
+  const n = stepsFor(k), low = n != null && n < LOW_STEPS, src = S.nutrition[k]?.steps?.src;
+  return h('section', { class: 'card steps-card' },
+    h('div', { class: 'row-between' },
+      h('div', null, h('div', { class: 'eyebrow' }, 'Steps'),
+        h('div', { class: 'title-s' }, n == null ? 'Not synced' : fmtN(n), n != null ? h('span', { class: 'pill tiny ' + (low ? 'warn soft' : 'train') }, low ? 'low · <5k' : 'ok') : null),
+        h('div', { class: 'muted tiny' }, n == null ? 'Run the “Lift steps” Shortcut, paste, or type it' : (src === 'shortcut' ? 'from Apple Health via Shortcut' : src === 'paste' ? 'pasted from Shortcut' : 'entered by hand') + (low ? ' · low-movement day: lean toward the rest-day target' : ''))),
+      h('div', { class: 'row gap-s' },
+        h('button', { class: 'btn small ghost', onclick: () => pasteSteps(k) }, 'Paste'),
+        h('button', { class: 'btn small ghost', onclick: () => editSteps(k) }, n == null ? 'Add' : 'Edit'))),
+    n != null ? h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill' + (low ? '' : ' green'), style: { width: Math.min(100, (n / 10000) * 100) + '%' } })) : null);
+}
+async function pasteSteps(k) {
+  let txt = '';
+  try { txt = await navigator.clipboard.readText(); } catch { toast('Clipboard not available — tap Edit and type the number'); return; }
+  let rows = parseSteps(txt);
+  if (!rows.length && /^\s*[\d,.]+\s*$/.test(txt)) rows = parseSteps(`${k} ${txt.trim()}`);
+  if (!rows.length) { toast('No steps found on the clipboard'); return; }
+  for (const [d, n] of rows) await setSteps(d, n, 'paste');
+  haptic('success'); toast(rows.length > 1 ? `Saved steps for ${rows.length} days` : `Saved ${fmtN(rows[0][1])} steps`, { icon: 'check' }); app.refresh();
+}
+function editSteps(k) {
+  const inp = h('input', { class: 'input num big-in', inputmode: 'numeric', value: stepsFor(k) ?? '', placeholder: '0' });
+  const s = sheet(h('div', { class: 'stack' }, h('div', { class: 'muted small' }, dayLabel(k)), inp,
+    h('div', { class: 'muted tiny' }, 'From the Health app: Browse → Activity → Steps. Stored only on this phone.')), {
+    title: 'Steps', actions: [
+      stepsFor(k) != null ? h('button', { class: 'btn ghost', onclick: async () => { await setSteps(k, null); s.close(); app.refresh(); } }, 'Clear') : null,
+      h('button', { class: 'btn primary', onclick: async () => { const v = parseInt(inp.value.replace(/\D/g, ''), 10); if (!Number.isFinite(v)) return; await setSteps(k, v, 'manual'); s.close(); haptic('success'); app.refresh(); } }, 'Save')].filter(Boolean) });
+  setTimeout(() => inp.focus(), 300);
 }
 
 // ───────────────────────── Quick add + favorites
@@ -458,6 +492,8 @@ function history(body) {
   const bw = (from, to) => { const xs = S.body.filter((b) => b.weight > 0 && b.date >= shiftDay(today(), -to) && b.date <= shiftDay(today(), -from)).map((b) => E.fromKg(E.toKg(b.weight, b.wUnit || 'lb'), U())); return xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : null; };
   const bwNow = bw(0, 6), bwPrev = bw(7, 13);
   const kAvg = avg(w7, 'kcal'), pAvg = avg(w7, 'p');
+  const st7 = info.slice(0, 7).map((d) => stepsFor(d.k)).filter((x) => x != null);
+  const stAvg = st7.length ? st7.reduce((a, x) => a + x, 0) / st7.length : null, lowDays = st7.filter((x) => x < LOW_STEPS).length;
   let verdict = 'Log a week of food and 2–3 weigh-ins to see the trend.';
   if (kAvg != null && kDays(w7) < 4) verdict = `Calories logged on ${kDays(w7)} of the last 7 days — log calories on 4+ days for a fair read vs. bodyweight.`;
   else if (bwNow != null && bwPrev != null && kAvg != null) {
@@ -470,6 +506,7 @@ function history(body) {
       h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, pAvg != null ? r0(pAvg) : '—'), h('div', { class: 'stat-l muted tiny' }, 'avg protein g')),
       h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, bwNow != null ? r1(bwNow) : '—'), h('div', { class: 'stat-l muted tiny' }, `avg weight ${U()}`))),
     h('div', { class: 'muted tiny' }, `${w7.length} of 7 days logged · protein floor (${n.proteinFloor} g) hit on ${w7.filter((d) => d.t.p >= n.proteinFloor).length}` + (bwPrev != null && bwNow != null ? ` · prior week weight ${r1(bwPrev)} ${U()}` : '')),
+    stAvg != null ? h('div', { class: 'row-between small' }, h('span', null, `Steps avg ${fmtN(stAvg)}/day`), h('span', { class: 'muted tiny' + (lowDays ? ' warn-text' : '') }, `${lowDays} of ${st7.length} synced days under 5k`)) : h('div', { class: 'muted tiny' }, 'Steps: none synced yet — see the Steps card on the Day view.'),
     h('div', { class: 'small' }, verdict)));
   const L28 = logged(info);
   const tr = L28.filter((d) => d.train), rs = L28.filter((d) => !d.train);
@@ -481,9 +518,12 @@ function history(body) {
   body.append(h('section', { class: 'card' }, h('div', { class: 'row-between' }, h('div', { class: 'eyebrow' }, 'Calories · 14 days'), h('div', { class: 'muted tiny' }, 'white = training day')),
     barChart(last14.map((d) => ({ y: d.t.kcal, label: d.k.slice(8), hl: d.train && d.t.kcal > 0 })), { target: (n.kcalTrain + n.kcalRest) / 2, color: '#FF9F0A', color2: '#FF375F', height: 120 }),
     h('div', { class: 'eyebrow' }, 'Protein · 14 days'),
-    barChart(last14.map((d) => ({ y: d.t.p, label: d.k.slice(8) })), { target: n.protein, color: '#30D158', color2: '#B4FF5A', height: 100 })));
+    barChart(last14.map((d) => ({ y: d.t.p, label: d.k.slice(8) })), { target: n.protein, color: '#30D158', color2: '#B4FF5A', height: 100 }),
+    last14.some((d) => stepsFor(d.k) != null) ? [h('div', { class: 'eyebrow' }, 'Steps · 14 days'),
+      barChart(last14.map((d) => ({ y: stepsFor(d.k) || 0, label: d.k.slice(8), hl: (stepsFor(d.k) ?? 1e9) < LOW_STEPS })), { target: LOW_STEPS, color: '#64D2FF', color2: '#0A84FF', height: 90 }),
+      h('div', { class: 'muted tiny' }, 'Line = 5k. Highlighted bars are low-step days.')] : null));
   body.append(h('section', { class: 'card' }, h('div', { class: 'eyebrow' }, 'Daily totals'), h('div', { class: 'list' }, info.slice(0, 21).map((d) => h('button', { class: 'row press', onclick: () => { app.nutDay = d.k; app.nutSeg = 'today'; app.go('nutrition', { force: true, seg: 'today' }); } },
-    h('div', { class: 'grow' }, h('div', { class: 'title-s' }, dayLabel(d.k), d.train ? h('span', { class: 'pill tiny train' }, 'training') : null), h('div', { class: 'muted tiny' }, d.t.n ? `${d.t.n} items` : 'not logged')),
+    h('div', { class: 'grow' }, h('div', { class: 'title-s' }, dayLabel(d.k), d.train ? h('span', { class: 'pill tiny train' }, 'training') : null), h('div', { class: 'muted tiny' }, (d.t.n ? `${d.t.n} items` : 'not logged') + (stepsFor(d.k) != null ? ` · ${fmtN(stepsFor(d.k))} steps` : ''), stepsFor(d.k) != null && stepsFor(d.k) < LOW_STEPS ? h('span', { class: 'pill tiny warn soft' }, 'low steps') : null)),
     h('div', { class: 'entry-n mono' }, h('div', null, d.t.n ? r0(d.t.kcal) : '—', h('span', { class: 'muted tiny' }, ` / ${d.target}`)), h('div', { class: 'muted tiny' + (d.t.p >= n.proteinFloor ? ' ok-text' : '') }, `${r0(d.t.p)} g P`)))))));
 }
 

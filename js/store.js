@@ -66,6 +66,29 @@ async function migrateProtein() {
 export function mealFor(d = new Date()) { const hr = d.getHours() + d.getMinutes() / 60; return hr < 10.5 ? 'breakfast' : hr < 15 ? 'lunch' : hr < 17.5 ? 'snack' : 'dinner'; }
 export function nDay(k = today()) { return S.nutrition[k] || { id: k, entries: [], training: null }; }
 export async function putNDay(day) { S.nutrition[day.id] = day; await db.put('nutrition', JSON.parse(JSON.stringify(day))); }
+export const LOW_STEPS = 5000;
+export function stepsFor(k) { const s = S.nutrition[k]?.steps; return s && Number.isFinite(+s.n) ? +s.n : null; }
+export async function setSteps(k, n, src = 'manual') {
+  const d = nDay(k);
+  if (n == null) delete d.steps; else d.steps = { n: Math.round(n), src, at: Date.now() };
+  await putNDay(d);
+}
+// Parses "#steps?date=YYYY-MM-DD&n=1234" (also n=1,234 / 1234.0) or pasted text "2026-10-21 8412" lines. Returns [[date, n], ...].
+export function parseSteps(str) {
+  const out = []; if (!str) return out;
+  const t = String(str).trim();
+  const q = t.match(/steps\?(.*)$/i);
+  if (q) {
+    const ps = new URLSearchParams(q[1]);
+    const n = ps.get('n') ?? ps.get('steps'), d = ps.get('date') || today();
+    if (n != null) out.push([d, n]);
+    for (const pair of (ps.get('days') || '').split(',')) { const [dd, nn] = pair.split(':'); if (dd && nn) out.push([dd, nn]); }
+  } else {
+    for (const m of t.matchAll(/(\d{4}-\d{2}-\d{2})\D{1,12}?([\d.,]+)/g)) out.push([m[1], m[2]]);
+  }
+  return out.map(([d, n]) => [d.trim(), Math.round(parseFloat(String(n).replace(/,/g, '')))])
+    .filter(([d, n]) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d)) && d <= today() && Number.isFinite(n) && n >= 0 && n < 150000);
+}
 export function nTotals(k) {
   const t = { kcal: 0, p: 0, c: 0, f: 0, fb: 0, al: 0, n: 0, missingKcal: 0 };
   for (const e of nDay(k).entries) { t.n++; if (e.kcal == null) t.missingKcal++; for (const f of ['kcal', 'p', 'c', 'f', 'fb', 'al']) t[f] += +e[f] || 0; }
