@@ -1,0 +1,287 @@
+import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, promptSheet, ring, segmented, toggle, confetti, unlockAudio } from './ui.js';
+import { S, load, derive, ctx, saveSettings, putSession, delSession, proteinTotal, proteinDay, addProtein, undoProtein, exportData, importData, eraseAll, U } from './store.js';
+import * as E from './engine.js';
+import { EX, WORKOUTS, ROTATION } from './data.js';
+import { renderTrain, startWorkout, openLogger } from './logger.js';
+import { renderProgress } from './progress.js';
+import { renderBody } from './body.js';
+import { maybeOnboard } from './onboarding.js';
+
+export const app = { tab: 'home', go, refresh: () => render(true) };
+window.__lift = { S, app };
+
+const TABS = [
+  { id: 'home', label: 'Today', icon: 'home' },
+  { id: 'train', label: 'Train', icon: 'train' },
+  { id: 'progress', label: 'Progress', icon: 'chart' },
+  { id: 'body', label: 'Body', icon: 'body' },
+];
+
+function go(tab, opts = {}) {
+  if (app.tab === tab && !opts.force) { $('#view').scrollTo({ top: 0, behavior: 'smooth' }); return; }
+  app.tab = tab; app.opts = opts;
+  render();
+}
+
+function render(keepScroll) {
+  const view = $('#view');
+  const y = view.scrollTop;
+  const fn = { home: renderHome, train: renderTrain, progress: renderProgress, body: renderBody }[app.tab];
+  const page = h('div', { class: 'page enter' });
+  view.replaceChildren(page);
+  fn(page, app.opts || {});
+  requestAnimationFrame(() => page.classList.remove('enter'));
+  if (keepScroll) view.scrollTop = y; else view.scrollTop = 0;
+  $$('.tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === app.tab));
+  $('#tabbar').classList.toggle('live', !!S.active);
+}
+
+function tabbar() {
+  return h('nav', { id: 'tabbar', class: 'glass' }, TABS.map((t) => h('button', { class: 'tab', 'data-tab': t.id, onclick: () => { haptic('light'); go(t.id); } },
+    h('span', { class: 'tab-ic' }, icon(t.icon, 24)), h('span', { class: 'tab-lbl' }, t.label), t.id === 'train' ? h('span', { class: 'live-dot' }) : null)));
+}
+
+// ───────────────────────── Home
+export function workoutBadge(wid, size = '') {
+  const w = WORKOUTS[wid];
+  return h('div', { class: 'badge ' + size, style: { background: `linear-gradient(135deg, ${w.hue[0]}, ${w.hue[1]})` } }, wid);
+}
+function greeting() { const hr = new Date().getHours(); return hr < 5 ? 'Late night' : hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening'; }
+
+function weekInfo() {
+  const ws = E.weekStart().getTime();
+  const days = new Set();
+  let n = 0;
+  for (const s of S.sessions) if (s.status === 'done') { const t = new Date(s.date).getTime(); if (t >= ws && t < ws + 7 * E.DAY) { n++; days.add((new Date(s.date).getDay() + 6) % 7); } }
+  return { n, days };
+}
+
+function renderHome(page) {
+  const d = S.d;
+  const now = new Date();
+  page.append(h('header', { class: 'large-head' },
+    h('div', null, h('div', { class: 'eyebrow' }, now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })),
+      h('h1', null, `${greeting()}, ${S.settings.name || 'there'}`)),
+    h('button', { class: 'icon-btn glass-btn', 'aria-label': 'Settings', onclick: openSettings }, icon('gear', 22))));
+
+  if (!isStandalone() && /iPhone|iPad|iPod/.test(navigator.userAgent)) page.append(installCard());
+
+  if (S.active) {
+    const w = WORKOUTS[S.active.workout];
+    const done = S.active.entries.reduce((a, e) => a + e.sets.filter((x) => x.done).length, 0);
+    page.append(h('button', { class: 'card resume press', onclick: () => go('train') }, workoutBadge(S.active.workout),
+      h('div', { class: 'grow' }, h('div', { class: 'eyebrow live-text' }, '● Workout in progress'), h('div', { class: 'title' }, w.name), h('div', { class: 'muted small' }, `${done} sets logged · tap to resume`)),
+      icon('chevron', 20)));
+  }
+
+  // Hero: next workout
+  const wid = d.next, w = WORKOUTS[wid];
+  let short = !!app.shortPref;
+  const c = ctx();
+  const preview = E.buildSession(wid, c, { short });
+  const list = h('div', { class: 'hero-list' });
+  const est = h('span');
+  const drawList = () => {
+    const p = E.buildSession(wid, c, { short });
+    list.replaceChildren(...p.entries.map((e) => {
+      const ex = EX[e.ex];
+      const off = !e.included;
+      return h('div', { class: 'hero-row' + (off ? ' off' : '') + (e.group ? ' ss' : '') },
+        h('span', { class: 'dot', style: { background: w.hue[0] } }),
+        h('span', { class: 'grow' }, ex.name, e.optional ? h('em', null, ' optional') : null, e.bonus ? h('em', null, ' bonus') : null),
+        h('span', { class: 'muted small mono' }, E.setsLabel(e.sets, ex.perSide)));
+    }));
+    est.textContent = short ? '~25 min · short version' : `~${w.est} min · ${p.entries.filter((e) => e.included).length} exercises`;
+  };
+  drawList();
+  const hero = h('section', { class: 'card hero', style: { '--h1': w.hue[0], '--h2': w.hue[1] } },
+    h('div', { class: 'hero-glow' }),
+    h('div', { class: 'hero-top' }, workoutBadge(wid, 'xl'),
+      h('div', { class: 'grow' }, h('div', { class: 'eyebrow' }, `Next up · ${d.nextIdx + 1} of ${ROTATION.length}`), h('h2', null, w.name), h('div', { class: 'muted small' }, est))),
+    d.deload.active ? h('div', { class: 'pill warn' }, icon('moon', 14), ` Deload week · ${d.deload.remaining} sessions left`) : d.phase === 'intro' ? h('div', { class: 'pill' }, icon('bolt', 14), ' Ramp-up phase · leave 2–3 reps in the tank') : null,
+    list,
+    h('div', { class: 'short-row' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Short on sleep?'), h('div', { class: 'muted small' }, 'Under 5 hours → first two exercises only, ~25 min. Still counts.')),
+      toggle(short, (v) => { short = v; app.shortPref = v; drawList(); }, 'Short version')),
+    h('button', { class: 'btn primary big', disabled: !!S.active, onclick: () => { unlockAudio(); haptic('medium'); startWorkout(wid, { short, planned: true }); } }, S.active ? 'Finish current workout first' : 'Start workout'),
+    h('div', { class: 'hero-actions' },
+      h('button', { class: 'btn ghost', onclick: () => skipNext(wid) }, icon('skip', 16), ' Skip'),
+      h('button', { class: 'btn ghost', onclick: () => chooseWorkout() }, icon('swap', 16), ' Do another')));
+  page.append(hero);
+
+  // Rotation strip
+  page.append(h('div', { class: 'rot-strip' }, ROTATION.map((r, i) => h('div', { class: 'rot' + (i === d.nextIdx ? ' on' : i < d.nextIdx ? ' past' : ''), style: { '--h1': WORKOUTS[r].hue[0] } }, r))));
+
+  // Deload suggestion
+  if (!d.deload.active && d.deload.due) {
+    page.append(h('section', { class: 'card notice' }, icon('moon', 22),
+      h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Time for an easy week'),
+        h('div', { class: 'muted small' }, d.deload.byTime ? `It's been ${Math.floor(d.deload.weeks)} weeks of hard training.` : 'A few lifts have stalled.', ' 4 lighter sessions (−10% weight, half the sets) help you come back stronger.')),
+      h('button', { class: 'btn small primary', onclick: async () => { S.settings.deload = { active: true, remaining: 4, lastEnd: S.settings.deload?.lastEnd || null }; await saveSettings(); derive(); render(true); toast('Deload on for 4 sessions', { icon: 'moon' }); } }, 'Start')));
+  }
+
+  // Week ring + protein side by side (stack on small)
+  const wk = weekInfo();
+  const week = h('section', { class: 'card week' },
+    ring(Math.min(1, wk.n / 3), { size: 112, stroke: 13, pct2: Math.min(1, wk.n / 4), colors: ['#30D158', '#B4FF5A'], colors2: ['#0A84FF', '#64D2FF'],
+      children: [h('div', { class: 'ring-num' }, String(wk.n)), h('div', { class: 'ring-sub' }, 'this week')] }),
+    h('div', { class: 'grow' },
+      h('div', { class: 'title-s' }, wk.n >= 4 ? 'Great week 🔥' : wk.n >= 3 ? 'Minimum hit ✓' : `${3 - wk.n} to your minimum`),
+      h('div', { class: 'muted small' }, wk.n >= 4 ? 'Four or more sessions — that’s the good-week zone.' : 'Green ring: 3 sessions. Blue ring: 4+ for a good week.'),
+      h('div', { class: 'days' }, ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((l, i) => h('div', { class: 'day' + (wk.days.has(i) ? ' on' : '') + (i === (now.getDay() + 6) % 7 ? ' today' : '') }, l)))));
+  page.append(week);
+  page.append(proteinCard());
+
+  // Backup nudge
+  const doneCount = S.sessions.filter((s) => s.status === 'done').length;
+  const lb = S.settings.lastBackup;
+  if (doneCount >= 3 && (!lb || Date.now() - lb > 14 * E.DAY)) {
+    page.append(h('button', { class: 'card notice press', onclick: () => backupSheet() }, icon('lock', 22),
+      h('div', { class: 'grow' }, h('div', { class: 'title-s' }, lb ? 'Back up your log' : 'Make your first backup'),
+        h('div', { class: 'muted small' }, 'Everything lives only on this phone. Save a backup file to Files or iCloud Drive now and then.')), icon('chevron', 18)));
+  }
+  page.append(h('div', { class: 'foot muted small' }, icon('lock', 13), ' Stored only on this device · no account · no tracking'));
+}
+
+function installCard() {
+  return h('section', { class: 'card notice' }, icon('download', 22), h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Install on your Home Screen'),
+    h('div', { class: 'muted small' }, 'In Safari tap Share ', h('b', null, '⎋'), ' → ', h('b', null, 'Add to Home Screen'), '. It then opens full-screen and works offline at the gym.')));
+}
+export function isStandalone() { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
+
+async function skipNext(wid) {
+  const ok = await confirmSheet(`Skip ${wid}?`, `Moves the rotation to the next workout. Use this if you're deliberately dropping ${WORKOUTS[wid].name} this cycle. Missing a day doesn't need a skip — the rotation just waits for you.`, 'Skip it');
+  if (!ok) return;
+  const s = { id: 'k' + Date.now().toString(36), workout: wid, date: E.localISO(new Date()), status: 'skipped', rotIndex: S.d.nextIdx, createdAt: Date.now(), entries: [] };
+  await putSession(s); derive(); render(true); haptic('light');
+  toast(`Skipped ${wid} · next is ${S.d.next}`, { icon: 'skip' });
+}
+
+function chooseWorkout() {
+  const s = sheet(h('div', { class: 'list' }, Object.values(WORKOUTS).map((w) => h('button', { class: 'row press', onclick: () => { s.close(); unlockAudio(); startWorkout(w.id, { short: !!app.shortPref, planned: w.id === S.d.next }); } },
+    workoutBadge(w.id), h('div', { class: 'grow' }, h('div', { class: 'title-s' }, w.name), h('div', { class: 'muted small' }, `~${w.est} min` + (w.id === S.d.next ? ' · next in rotation' : ''))), icon('chevron', 18)))),
+    { title: 'Pick a workout' });
+  s.body.append(h('p', { class: 'muted small pad' }, 'Doing a different workout today doesn’t move the rotation — your next planned workout stays queued.'));
+}
+
+// ───────────────────────── Protein
+function proteinCard() {
+  const tgt = S.settings.proteinTarget || 145;
+  const tot = proteinTotal();
+  const card = h('section', { class: 'card protein' });
+  const pct = Math.min(1, tot / tgt);
+  const favs = S.settings.favorites || [];
+  card.append(
+    h('div', { class: 'row-between' }, h('div', null, h('div', { class: 'eyebrow' }, 'Protein today'),
+      h('div', { class: 'big-num' }, String(Math.round(tot)), h('span', { class: 'muted' }, ` / ${tgt} g`))),
+      h('button', { class: 'btn small ghost', onclick: editFavorites }, 'Edit')),
+    h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: { width: pct * 100 + '%' } })),
+    h('div', { class: 'muted small' }, tot >= tgt ? 'Target hit. 💪' : `${Math.round(tgt - tot)} g to go — spread it over 3–4 meals.`),
+    h('div', { class: 'chips' },
+      favs.map((f) => h('button', { class: 'chip press', onclick: async () => { await addProtein(f.g, f.name); haptic('light'); toast(`+${f.g} g · ${f.name}`, { icon: 'plus' }); render(true); } }, h('b', null, `+${f.g}`), ' ', f.name)),
+      h('button', { class: 'chip press dashed', onclick: async () => { const r = await promptSheet('Add protein', [{ label: 'Grams', inputmode: 'decimal', placeholder: 'e.g. 30' }, { label: 'What (optional)', placeholder: 'e.g. chicken bowl' }], 'Add'); if (r && +r[0] > 0) { await addProtein(+r[0], r[1] || 'Custom'); haptic('light'); render(true); } } }, '+ Custom'),
+      proteinDay().entries.length ? h('button', { class: 'chip press', onclick: async () => { const x = await undoProtein(); x && toast(`Removed ${x.g} g`); render(true); } }, 'Undo') : null),
+    !favs.length ? h('div', { class: 'muted small' }, 'Tip: tap Edit to save one-tap buttons for things you eat often (Fairlife, your usual bar, lunch order) with the grams from the label.') : null);
+  return card;
+}
+function editFavorites() {
+  const favs = structuredClone(S.settings.favorites || []);
+  const listEl = h('div', { class: 'list' });
+  const draw = () => listEl.replaceChildren(...favs.map((f, i) => h('div', { class: 'fav-row' },
+    h('input', { class: 'input', value: f.name, placeholder: 'Name', oninput: (e) => (f.name = e.target.value) }),
+    h('input', { class: 'input num', value: f.g, inputmode: 'decimal', placeholder: 'g', oninput: (e) => (f.g = +e.target.value || 0) }),
+    h('button', { class: 'icon-btn', onclick: () => { favs.splice(i, 1); draw(); } }, icon('trash', 18)))),
+    h('button', { class: 'btn ghost', onclick: () => { favs.push({ name: '', g: '' }); draw(); setTimeout(() => $$('.fav-row input', listEl).at(-2)?.focus(), 50); } }, icon('plus', 16), ' Add favorite'));
+  draw();
+  const s = sheet(h('div', null, h('p', { class: 'muted small pad' }, 'Enter grams of protein from each label. These become one-tap buttons.'), listEl,
+    h('label', { class: 'form-row' }, h('span', null, 'Daily target (g)'), h('input', { class: 'input num', id: 'ptgt', inputmode: 'numeric', value: S.settings.proteinTarget }))), {
+    title: 'Protein buttons',
+    actions: [h('button', { class: 'btn primary', onclick: async () => {
+      S.settings.favorites = favs.filter((f) => f.name && +f.g > 0).map((f) => ({ name: f.name.trim(), g: +f.g }));
+      S.settings.proteinTarget = +$('#ptgt').value || 145; await saveSettings(); s.close(); render(true);
+    } }, 'Save')],
+  });
+}
+
+// ───────────────────────── Settings
+export function openSettings() {
+  const st = S.settings;
+  const set = async (k, v) => { st[k] = v; await saveSettings(); derive(); };
+  const numRow = (label, k, suffix, opts = {}) => h('label', { class: 'form-row' }, h('span', null, label),
+    h('div', { class: 'with-suffix' }, h('input', { class: 'input num', inputmode: 'decimal', value: st[k], onchange: (e) => set(k, +e.target.value || opts.def || 0) }), h('span', { class: 'muted' }, suffix)));
+  const d = S.d;
+  const body = h('div', { class: 'settings' },
+    h('div', { class: 'group-title' }, 'Units'),
+    h('div', { class: 'group' },
+      h('div', { class: 'form-row' }, h('span', null, 'Weight unit'), segmented([{ label: 'lb', value: 'lb' }, { label: 'kg', value: 'kg' }], st.unit, (v) => set('unit', v))),
+      h('div', { class: 'form-row' }, h('span', null, 'Waist unit'), segmented([{ label: 'in', value: 'in' }, { label: 'cm', value: 'cm' }], st.waistUnit, (v) => set('waistUnit', v))),
+      h('div', { class: 'note muted small' }, 'You can also flip lb/kg for a single workout or a single exercise while logging.')),
+    h('div', { class: 'group-title' }, 'You'),
+    h('div', { class: 'group' },
+      h('label', { class: 'form-row' }, h('span', null, 'Name'), h('input', { class: 'input', value: st.name, onchange: (e) => set('name', e.target.value) })),
+      h('label', { class: 'form-row' }, h('span', null, 'Bodyweight'), h('div', { class: 'with-suffix' }, h('input', { class: 'input num', inputmode: 'decimal', value: st.bodyweight, onchange: (e) => set('bodyweight', +e.target.value || 0) }), h('span', { class: 'muted' }, st.bodyweightUnit))),
+      h('div', { class: 'note muted small' }, 'Used for pull-ups and dips. Your latest Body log entry overrides this.'),
+      numRow('Protein target', 'proteinTarget', 'g/day', { def: 145 })),
+    h('div', { class: 'group-title' }, 'Gym'),
+    h('div', { class: 'group' },
+      numRow('Barbell (lb)', 'barLb', 'lb', { def: 45 }), numRow('Barbell (kg)', 'barKg', 'kg', { def: 20 }),
+      numRow('Rest · big lifts', 'restCompound', 'sec', { def: 150 }), numRow('Rest · small lifts', 'restSmall', 'sec', { def: 75 }), numRow('Rest · after superset', 'restSuperset', 'sec', { def: 90 }),
+      h('div', { class: 'form-row' }, h('span', null, 'Timer sound'), toggle(st.sound !== false, (v) => set('sound', v)))),
+    h('div', { class: 'group-title' }, 'Program'),
+    h('div', { class: 'group' },
+      h('div', { class: 'form-row' }, h('span', null, 'Phase'), h('span', { class: 'muted' }, d.phase === 'intro' ? 'Ramp-up (first 2 weeks)' : d.phase === 'deload' ? 'Deload' : 'Build')),
+      h('label', { class: 'form-row' }, h('span', null, 'Next workout'), h('select', { class: 'input', onchange: async (e) => { st.rotOverride = { index: +e.target.value, at: Date.now() }; await saveSettings(); derive(); app.refresh(); toast('Rotation updated'); } },
+        ROTATION.map((r, i) => h('option', { value: i, selected: i === d.nextIdx }, `${i + 1}. ${r} · ${WORKOUTS[r].name}`)))),
+      numRow('Deload every', 'deloadEvery', 'weeks', { def: 7 }),
+      h('div', { class: 'form-row' }, h('span', null, 'Deload now'), toggle(!!st.deload?.active, async (v) => { st.deload = v ? { active: true, remaining: 4, lastEnd: st.deload?.lastEnd || null } : { active: false, remaining: 0, lastEnd: Date.now() }; await saveSettings(); derive(); app.refresh(); })),
+      Object.keys(st.swaps || {}).length ? h('button', { class: 'btn ghost', onclick: async () => { st.swaps = {}; await saveSettings(); toast('Saved swaps cleared'); } }, `Reset ${Object.keys(st.swaps).length} saved exercise swap(s)`) : null),
+    h('div', { class: 'group-title' }, 'Your data'),
+    h('div', { class: 'group' },
+      h('div', { class: 'note muted small' }, icon('lock', 13), ' Workouts, body stats and photos are stored only on this phone (IndexedDB). Nothing is uploaded. Deleting the app or clearing Safari data erases it — keep a backup.'),
+      h('button', { class: 'btn ghost', onclick: () => backupSheet() }, icon('download', 16), ' Back up / restore'),
+      h('button', { class: 'btn ghost', onclick: () => maybeOnboard(true) }, 'Show the intro again'),
+      h('div', { class: 'form-row' }, h('span', null, 'Last backup'), h('span', { class: 'muted' }, st.lastBackup ? new Date(st.lastBackup).toLocaleDateString() : 'Never')),
+      h('button', { class: 'btn danger-ghost', onclick: async () => { if (await confirmSheet('Erase everything?', 'This deletes every workout, body entry and photo on this device. It cannot be undone.', 'Erase', true) && await confirmSheet('Really erase?', 'Last chance — export a backup first if unsure.', 'Erase all', true)) { await eraseAll(); app.tab = 'home'; app.refresh(); toast('All data erased'); } } }, 'Erase all data')),
+    h('div', { class: 'foot muted small' }, 'Lift · v', window.LIFT_VERSION || ''));
+  sheet(body, { title: 'Settings', tall: true, onClose: () => app.refresh() });
+}
+
+export function backupSheet() {
+  let withPhotos = true;
+  const s = sheet(h('div', { class: 'settings' },
+    h('p', { class: 'muted small pad' }, 'A backup is a single JSON file you keep (Files, iCloud Drive, AirDrop to your laptop). Restore it here on any phone.'),
+    h('div', { class: 'group' },
+      h('div', { class: 'form-row' }, h('span', null, `Include photos (${S.photos.length})`), toggle(true, (v) => (withPhotos = v))),
+      h('button', { class: 'btn primary', onclick: async () => {
+        const data = await exportData(withPhotos);
+        const name = `lift-backup-${E.dayKey()}.json`;
+        const file = new File([JSON.stringify(data)], name, { type: 'application/json' });
+        let shared = false;
+        try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: 'Lift backup' }); shared = true; } } catch (e) { if (e.name === 'AbortError') return; }
+        if (!shared) { const a = h('a', { href: URL.createObjectURL(file), download: name }); document.body.append(a); a.click(); a.remove(); }
+        S.settings.lastBackup = Date.now(); await saveSettings(); toast('Backup saved', { icon: 'check' });
+      } }, icon('download', 16), ' Export backup')),
+    h('div', { class: 'group' },
+      h('label', { class: 'btn ghost file-btn' }, icon('upload', 16), ' Restore from backup…', h('input', { type: 'file', accept: 'application/json,.json', onchange: async (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        try {
+          const obj = JSON.parse(await f.text());
+          if (!(await confirmSheet('Replace all data?', `This backup has ${obj.sessions?.length || 0} workouts and ${obj.photos?.length || 0} photos. It will replace what's on this phone.`, 'Restore', true))) return;
+          await importData(obj); s.close(); app.refresh(); toast('Restored', { icon: 'check' });
+        } catch (err) { toast('Could not read that file: ' + err.message, { tone: 'bad', ms: 3500 }); }
+      } })))), { title: 'Backup & restore' });
+}
+
+// ───────────────────────── Boot
+async function boot() {
+  const root = $('#app');
+  root.append(h('main', { id: 'view' }), tabbar(), h('div', { id: 'toasts' }));
+  await load();
+  try { navigator.storage?.persist?.(); } catch {}
+  render();
+  maybeOnboard();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && app.tab === 'home') { derive(); render(true); } });
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+boot();
+
+export { render, weekInfo, confetti, delSession };
