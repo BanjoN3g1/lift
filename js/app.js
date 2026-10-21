@@ -6,6 +6,8 @@ import { renderTrain, startWorkout, openLogger } from './logger.js';
 import { renderProgress } from './progress.js';
 import { renderBody } from './body.js';
 import { maybeOnboard } from './onboarding.js';
+import { renderNutrition, targetsSheet } from './nutrition.js';
+import { nTotals, kcalTarget, isTrainingDay, mealFor, nDay, putNDay } from './store.js';
 
 export const app = { tab: 'home', go, refresh: () => render(true) };
 window.__lift = { S, app };
@@ -13,6 +15,7 @@ window.__lift = { S, app };
 const TABS = [
   { id: 'home', label: 'Today', icon: 'home' },
   { id: 'train', label: 'Train', icon: 'train' },
+  { id: 'nutrition', label: 'Fuel', icon: 'drop' },
   { id: 'progress', label: 'Progress', icon: 'chart' },
   { id: 'body', label: 'Body', icon: 'body' },
 ];
@@ -26,7 +29,7 @@ function go(tab, opts = {}) {
 function render(keepScroll) {
   const view = $('#view');
   const y = view.scrollTop;
-  const fn = { home: renderHome, train: renderTrain, progress: renderProgress, body: renderBody }[app.tab];
+  const fn = { home: renderHome, train: renderTrain, nutrition: renderNutrition, progress: renderProgress, body: renderBody }[app.tab];
   const page = h('div', { class: 'page enter' });
   view.replaceChildren(page);
   fn(page, app.opts || {});
@@ -165,41 +168,18 @@ function chooseWorkout() {
 
 // ───────────────────────── Protein
 function proteinCard() {
-  const tgt = S.settings.proteinTarget || 145;
-  const tot = proteinTotal();
-  const card = h('section', { class: 'card protein' });
-  const pct = Math.min(1, tot / tgt);
-  const favs = S.settings.favorites || [];
-  card.append(
-    h('div', { class: 'row-between' }, h('div', null, h('div', { class: 'eyebrow' }, 'Protein today'),
-      h('div', { class: 'big-num' }, String(Math.round(tot)), h('span', { class: 'muted' }, ` / ${tgt} g`))),
-      h('button', { class: 'btn small ghost', onclick: editFavorites }, 'Edit')),
-    h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: { width: pct * 100 + '%' } })),
-    h('div', { class: 'muted small' }, tot >= tgt ? 'Target hit. 💪' : `${Math.round(tgt - tot)} g to go — spread it over 3–4 meals.`),
-    h('div', { class: 'chips' },
-      favs.map((f) => h('button', { class: 'chip press', onclick: async () => { await addProtein(f.g, f.name); haptic('light'); toast(`+${f.g} g · ${f.name}`, { icon: 'plus' }); render(true); } }, h('b', null, `+${f.g}`), ' ', f.name)),
-      h('button', { class: 'chip press dashed', onclick: async () => { const r = await promptSheet('Add protein', [{ label: 'Grams', inputmode: 'decimal', placeholder: 'e.g. 30' }, { label: 'What (optional)', placeholder: 'e.g. chicken bowl' }], 'Add'); if (r && +r[0] > 0) { await addProtein(+r[0], r[1] || 'Custom'); haptic('light'); render(true); } } }, '+ Custom'),
-      proteinDay().entries.length ? h('button', { class: 'chip press', onclick: async () => { const x = await undoProtein(); x && toast(`Removed ${x.g} g`); render(true); } }, 'Undo') : null),
-    !favs.length ? h('div', { class: 'muted small' }, 'Tip: tap Edit to save one-tap buttons for things you eat often (Fairlife, your usual bar, lunch order) with the grams from the label.') : null);
-  return card;
-}
-function editFavorites() {
-  const favs = structuredClone(S.settings.favorites || []);
-  const listEl = h('div', { class: 'list' });
-  const draw = () => listEl.replaceChildren(...favs.map((f, i) => h('div', { class: 'fav-row' },
-    h('input', { class: 'input', value: f.name, placeholder: 'Name', oninput: (e) => (f.name = e.target.value) }),
-    h('input', { class: 'input num', value: f.g, inputmode: 'decimal', placeholder: 'g', oninput: (e) => (f.g = +e.target.value || 0) }),
-    h('button', { class: 'icon-btn', onclick: () => { favs.splice(i, 1); draw(); } }, icon('trash', 18)))),
-    h('button', { class: 'btn ghost', onclick: () => { favs.push({ name: '', g: '' }); draw(); setTimeout(() => $$('.fav-row input', listEl).at(-2)?.focus(), 50); } }, icon('plus', 16), ' Add favorite'));
-  draw();
-  const s = sheet(h('div', null, h('p', { class: 'muted small pad' }, 'Enter grams of protein from each label. These become one-tap buttons.'), listEl,
-    h('label', { class: 'form-row' }, h('span', null, 'Daily target (g)'), h('input', { class: 'input num', id: 'ptgt', inputmode: 'numeric', value: S.settings.proteinTarget }))), {
-    title: 'Protein buttons',
-    actions: [h('button', { class: 'btn primary', onclick: async () => {
-      S.settings.favorites = favs.filter((f) => f.name && +f.g > 0).map((f) => ({ name: f.name.trim(), g: +f.g }));
-      S.settings.proteinTarget = +$('#ptgt').value || 145; await saveSettings(); s.close(); render(true);
-    } }, 'Save')],
-  });
+  const k = E.dayKey(), t = nTotals(k), n = S.settings.nutrition, kt = kcalTarget(k);
+  const favs = (n.favorites || []).slice(0, 4);
+  return h('section', { class: 'card protein' },
+    h('div', { class: 'row-between' }, h('div', null, h('div', { class: 'eyebrow' }, `Fuel today · ${isTrainingDay(k) ? 'training' : 'rest'} day`),
+      h('div', { class: 'big-num' }, String(Math.round(t.kcal)), h('span', { class: 'muted small' }, ` / ${kt} kcal`))),
+      h('button', { class: 'btn small ghost', onclick: () => go('nutrition') }, 'Open')),
+    h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: { width: Math.min(100, (t.kcal / kt) * 100) + '%' } })),
+    h('div', { class: 'row-between small' }, h('span', null, `Protein ${Math.round(t.p)} / ${n.protein} g`), h('span', { class: 'muted tiny' }, t.p >= n.proteinFloor ? 'floor hit ✓' : `${Math.round(n.proteinFloor - t.p)} g to ${n.proteinFloor} g floor`)),
+    h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill green', style: { width: Math.min(100, (t.p / n.protein) * 100) + '%' } })),
+    favs.length ? h('div', { class: 'chips' }, favs.map((f) => h('button', { class: 'chip press', onclick: async () => {
+      const d = nDay(k); d.entries.push({ id: 'n' + Date.now().toString(36), t: Date.now(), name: f.name, kcal: f.kcal ?? null, p: +f.p || 0, c: f.c, f: f.f, fb: f.fb, meal: mealFor(), src: 'fav' });
+      await putNDay(d); haptic('light'); toast(`+ ${f.name}`, { icon: 'plus' }); render(true); } }, h('b', null, f.p ? `+${f.p} g` : `${f.kcal} kcal`), ' ', f.name))) : null);
 }
 
 // ───────────────────────── Settings
@@ -220,7 +200,7 @@ export function openSettings() {
       h('label', { class: 'form-row' }, h('span', null, 'Name'), h('input', { class: 'input', value: st.name, onchange: (e) => set('name', e.target.value) })),
       h('label', { class: 'form-row' }, h('span', null, 'Bodyweight'), h('div', { class: 'with-suffix' }, h('input', { class: 'input num', inputmode: 'decimal', value: st.bodyweight, onchange: (e) => set('bodyweight', +e.target.value || 0) }), h('span', { class: 'muted' }, st.bodyweightUnit))),
       h('div', { class: 'note muted small' }, 'Used for pull-ups and dips. Your latest Body log entry overrides this.'),
-      numRow('Protein target', 'proteinTarget', 'g/day', { def: 145 })),
+      h('button', { class: 'btn ghost', onclick: () => targetsSheet() }, 'Nutrition targets (kcal, protein, fat, fiber)')),
     h('div', { class: 'group-title' }, 'Gym'),
     h('div', { class: 'group' },
       numRow('Barbell (lb)', 'barLb', 'lb', { def: 45 }), numRow('Barbell (kg)', 'barKg', 'kg', { def: 20 }),
@@ -280,7 +260,15 @@ async function boot() {
   render();
   maybeOnboard();
   document.addEventListener('visibilitychange', () => { if (!document.hidden && app.tab === 'home') { derive(); render(true); } });
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    const had = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!had) return; // first install, nothing to refresh
+      if (!document.querySelector('.sheet') && !S.active) location.reload();
+      else toast('App updated — reopen to load the new version', { icon: 'check' });
+    });
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
 }
 boot();
 

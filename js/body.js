@@ -66,11 +66,11 @@ function metrics(body) {
 
   // Protein, last 14 days
   const days = [];
-  for (let i = 13; i >= 0; i--) { const d = new Date(Date.now() - i * E.DAY); const k = E.dayKey(d); days.push({ y: proteinTotal(k), label: i % 2 ? '' : String(d.getDate()), hl: i === 0 && proteinTotal(k) >= S.settings.proteinTarget }); }
+  for (let i = 13; i >= 0; i--) { const d = new Date(Date.now() - i * E.DAY); const k = E.dayKey(d); days.push({ y: proteinTotal(k), label: i % 2 ? '' : String(d.getDate()), hl: i === 0 && proteinTotal(k) >= S.settings.nutrition.protein }); }
   const logged = days.filter((d) => d.y > 0);
   const avg = logged.length ? logged.reduce((a, d) => a + d.y, 0) / logged.length : 0;
-  body.append(h('section', { class: 'card' }, h('div', { class: 'row-between' }, h('div', { class: 'eyebrow' }, 'Protein · 14 days'), h('div', { class: 'muted tiny' }, logged.length ? `avg ${Math.round(avg)} g on logged days` : 'log from Today')),
-    barChart(days, { target: S.settings.proteinTarget, color: '#FF375F', color2: '#FF9F0A', height: 110 })));
+  body.append(h('section', { class: 'card' }, h('div', { class: 'row-between' }, h('div', { class: 'eyebrow' }, 'Protein · 14 days'), h('div', { class: 'muted tiny' }, logged.length ? `avg ${Math.round(avg)} g on logged days` : 'log in Fuel')),
+    barChart(days, { target: S.settings.nutrition.protein, color: '#FF375F', color2: '#FF9F0A', height: 110 })));
 
   if (S.body.length) body.append(h('section', { class: 'card' }, h('div', { class: 'eyebrow' }, 'Entries'), h('div', { class: 'list' }, [...S.body].reverse().slice(0, 30).map((b) => h('div', { class: 'row' },
     h('div', { class: 'grow' }, h('div', { class: 'title-s' }, fmtDate(b.date, { weekday: 'short', month: 'short', day: 'numeric' })),

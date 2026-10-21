@@ -391,3 +391,50 @@ body.sheet-open #view { overflow: hidden; }
 .ob-dots span { width: 8px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.25); transition: all .35s var(--spring); }
 .ob-dots span.on { width: 24px; background: #fff; }
 .ob-foot { padding: 0 24px; }
+/* Nutrition */
+.day-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.day-nav-t { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.day-type { cursor: pointer; }
+.pill.train, .day-type.train { background: rgba(48, 209, 88, .18); color: var(--green); }
+.nut-rings { flex-direction: row; align-items: center; gap: 16px; }
+.nut-legend { display: flex; flex-direction: column; gap: 10px; }
+.legend { display: flex; gap: 8px; align-items: flex-start; }
+.lg-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex: none; }
+.macro-bars { gap: 12px; }
+.mbar { display: flex; flex-direction: column; gap: 5px; }
+.mbar .bar-track { position: relative; height: 8px; }
+.bar-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: rgba(255,255,255,.7); border-radius: 1px; }
+.bar-fill.green { background: linear-gradient(90deg, var(--green), #B4FF5A); }
+.quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.qbtn { background: rgba(255,255,255,.07); border-radius: 14px; padding: 12px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; }
+.qbtn b { color: var(--green); }
+.action-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.abtn { background: rgba(255,255,255,.07); border-radius: 14px; padding: 10px 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-align: center; }
+.abtn .ic { color: var(--orange); }
+.stack-s { display: flex; flex-direction: column; gap: 8px; }
+.chip.fav { flex-direction: column; height: auto; padding: 7px 14px; align-items: flex-start; border-radius: 14px; }
+.meal { gap: 8px; }
+.entry { align-items: flex-start; }
+.entry-n { text-align: right; flex: none; }
+.src { display: inline-block; margin-top: 4px; font-size: 10px; font-weight: 700; letter-spacing: .02em; padding: 2px 7px; border-radius: 99px; background: rgba(255,255,255,.08); color: var(--muted); }
+.src.usda { background: rgba(10,132,255,.16); color: #8ec5ff; } .src.off { background: rgba(255,159,10,.16); color: var(--orange); } .src.fav { background: rgba(48,209,88,.14); color: var(--green); }
+.qa-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.qa-fields label { display: flex; flex-direction: column; gap: 4px; }
+.big-in { width: 100%; height: 56px; font-size: 28px; font-weight: 750; text-align: left; }
+.fav-edit { display: grid; grid-template-columns: 1fr 64px 60px 36px; gap: 6px; align-items: center; }
+.qty-row { display: flex; align-items: center; gap: 10px; justify-content: center; }
+.qty-row .input.huge { width: 120px; text-align: center; }
+.step { width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,.1); font-size: 26px; font-weight: 600; transition: transform .2s var(--spring); }
+.step:active { transform: scale(.88); }
+.unit-sel { width: 100%; max-width: 100%; }
+.portion-out { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.macro-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: 100%; }
+.stat-grid.three { grid-template-columns: repeat(3, 1fr); }
+.tvr { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tvr .stat { text-align: left; padding: 12px; }
+.ok-text { color: var(--green); }
+.scan-box { position: relative; aspect-ratio: 4/3; border-radius: 18px; overflow: hidden; background: #111; }
+.scan-video { width: 100%; height: 100%; object-fit: cover; }
+.scan-line { position: absolute; left: 10%; right: 10%; top: 50%; height: 2px; background: var(--red); box-shadow: 0 0 12px var(--red); animation: scan 1.8s ease-in-out infinite alternate; }
+@keyframes scan { from { transform: translateY(-50px); } to { transform: translateY(50px); } }
+.tab-lbl { font-size: 10.5px; }

@@ -1,7 +1,7 @@
 // Tiny IndexedDB wrapper. Everything lives on-device; nothing is ever sent anywhere.
 const DB_NAME = 'lift-local';
-const VERSION = 1;
-const STORES = { kv: 'k', sessions: 'id', body: 'id', photos: 'id', protein: 'id' };
+const VERSION = 2;
+const STORES = { kv: 'k', sessions: 'id', body: 'id', photos: 'id', protein: 'id', nutrition: 'id' };
 let dbp;
 function open() {
   if (dbp) return dbp;
