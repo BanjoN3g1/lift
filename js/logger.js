@@ -1,5 +1,5 @@
 import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, segmented, confetti, beep, unlockAudio } from './ui.js';
-import { S, derive, ctx, saveSettings, putSession, delSession, saveActiveSoon, bwKg, dispKg } from './store.js';
+import { S, derive, ctx, saveSettings, putSession, delSession, saveActiveSoon, bwKg, dispKg, discardActive, activeDoneSets } from './store.js';
 import * as E from './engine.js';
 import { EX, WORKOUTS, EQUIP_LABEL } from './data.js';
 import { app, workoutBadge, weekInfo } from './app.js';
@@ -50,7 +50,8 @@ function renderLogger(page, s, mode) {
   const head = h('div', { class: 'log-head glass' },
     h('div', { class: 'log-head-row' },
       mode === 'edit' ? h('button', { class: 'btn small ghost', onclick: () => { app.editSession = null; app.go('progress', { force: true, seg: 'history' }); } }, 'Cancel') :
-        h('button', { class: 'icon-btn', 'aria-label': 'Workout options', onclick: () => sessionMenu() }, icon('more', 22)),
+        h('div', { class: 'log-head-l' }, h('button', { class: 'btn small danger-ghost', 'aria-label': 'Cancel workout', onclick: () => cancelWorkout() }, 'Cancel'),
+          h('button', { class: 'icon-btn', 'aria-label': 'Workout options', onclick: () => sessionMenu() }, icon('more', 22))),
       h('div', { class: 'log-title' }, workoutBadge(s.workout, 'sm'), h('div', null, h('div', { class: 'title-s' }, w.name), h('div', { class: 'muted tiny' }, mode === 'edit' ? 'Editing' : elapsed, s.short ? ' · short' : '', s.deload ? ' · deload' : ''))),
       h('button', { class: 'btn small primary', onclick: () => (mode === 'edit' ? saveEdit() : finish()) }, mode === 'edit' ? 'Save' : 'Finish')),
     progress);
@@ -70,7 +71,8 @@ function renderLogger(page, s, mode) {
   redrawAll();
   page.append(h('div', { class: 'log-foot' },
     h('button', { class: 'btn ghost', onclick: () => pickExercise((id) => addExercise(id)) }, icon('plus', 16), ' Add exercise'),
-    mode === 'edit' ? h('button', { class: 'btn danger-ghost', onclick: deleteEdited }, icon('trash', 16), ' Delete workout') : null));
+    mode === 'edit' ? h('button', { class: 'btn danger-ghost', onclick: deleteEdited }, icon('trash', 16), ' Delete workout')
+      : h('button', { class: 'btn danger-ghost', onclick: () => cancelWorkout() }, icon('trash', 16), ' Cancel workout (discard)')));
   if (mode === 'live') restoreRest();
 }
 
@@ -447,7 +449,18 @@ function sessionMenu() {
     item('timer', 'Start a rest timer', () => startRest(S.settings.restCompound, 'Manual')),
     item('plates', 'Plate calculator', () => plateSheet(0, commonUnit(s))),
     item('plus', 'Add exercise', () => pickExercise(addExercise)),
-    item('trash', 'Discard workout', async () => { if (await confirmSheet('Discard this workout?', 'Nothing from this session will be saved.', 'Discard', true)) { stopRest(); await delSession(s.id); S.active = null; derive(); app.go('home', { force: true }); } }, 'danger-text')), { title: 'Workout' });
+    item('trash', 'Cancel workout (discard)', () => cancelWorkout(), 'danger-text')), { title: 'Workout' });
+}
+
+// Discard the live session with a danger-style confirm. Used by the logger header, menu, bottom button and home card.
+export async function cancelWorkout() {
+  const a = S.active; if (!a) return false;
+  const n = activeDoneSets(a), w = WORKOUTS[a.workout];
+  const msg = `${n ? `${n} logged set${n > 1 ? 's' : ''} will be deleted. ` : 'No sets logged. '}Nothing is saved to history: no PRs, no progression changes. Next up stays ${w?.name || a.workout}.`;
+  if (!(await confirmSheet('Discard workout?', `${w?.name || 'This workout'}: ` + msg, 'Discard workout', true, 'Keep workout'))) return false;
+  stopRest(); await discardActive(); haptic('medium');
+  app.go('home', { force: true }); toast('Workout discarded');
+  return true;
 }
 
 // ───────────────────────── Finish / save
@@ -455,7 +468,7 @@ async function finish() {
   const s = S.active;
   const sets = s.entries.filter((e) => e.included && !e.skipped).flatMap((e) => e.sets);
   const doneN = sets.filter((x) => x.done).length;
-  if (!doneN) { if (await confirmSheet('No sets logged', 'Discard this workout instead?', 'Discard', true)) { await delSession(s.id); S.active = null; stopRest(); derive(); app.go('home', { force: true }); } return; }
+  if (!doneN) { if (await confirmSheet('No sets logged', 'Nothing to save. Discard this workout instead? Next up stays the same.', 'Discard workout', true)) { stopRest(); await discardActive(); app.go('home', { force: true }); toast('Workout discarded'); } return; }
   const left = sets.length - doneN;
   if (left > 0 && !(await confirmSheet('Finish workout?', `${left} planned set${left > 1 ? 's' : ''} not ticked off — they'll be left out, and those lifts keep their current targets.`, 'Finish'))) return;
   stopRest();

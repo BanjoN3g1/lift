@@ -110,6 +110,16 @@ export async function putSession(s) {
 export async function delSession(id) { S.sessions = S.sessions.filter((s) => s.id !== id); await db.del('sessions', id); }
 
 let saveT;
+// Throws away the in-progress session entirely: not in history, so no PRs/progression, and the rotation
+// pointer (derived only from done/skipped sessions) stays put.
+export async function discardActive() {
+  clearTimeout(saveT);
+  const a = S.active; if (!a) return;
+  S.active = null;
+  await delSession(a.id);
+  derive();
+}
+export function activeDoneSets(a = S.active) { return a ? a.entries.reduce((n, e) => n + e.sets.filter((x) => x.done).length, 0) : 0; }
 export function saveActiveSoon() { clearTimeout(saveT); saveT = setTimeout(() => S.active && putSession(S.active), 250); }
 
 // Display helpers (global unit)

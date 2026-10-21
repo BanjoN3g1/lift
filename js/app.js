@@ -2,10 +2,11 @@ import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, promptSheet, ring, 
 import { S, load, derive, ctx, saveSettings, putSession, delSession, proteinTotal, proteinDay, addProtein, undoProtein, exportData, importData, eraseAll, U } from './store.js';
 import * as E from './engine.js';
 import { EX, WORKOUTS, ROTATION } from './data.js';
-import { renderTrain, startWorkout, openLogger } from './logger.js';
+import { renderTrain, startWorkout, openLogger, cancelWorkout } from './logger.js';
 import { renderProgress } from './progress.js';
 import { renderBody } from './body.js';
 import { maybeOnboard } from './onboarding.js';
+import { activeDoneSets, discardActive } from './store.js';
 import { renderNutrition, targetsSheet } from './nutrition.js';
 import { nTotals, kcalTarget, isTrainingDay, mealFor, nDay, putNDay, parseSteps, setSteps, LOW_STEPS } from './store.js';
 
@@ -72,9 +73,13 @@ function renderHome(page) {
   if (S.active) {
     const w = WORKOUTS[S.active.workout];
     const done = S.active.entries.reduce((a, e) => a + e.sets.filter((x) => x.done).length, 0);
-    page.append(h('button', { class: 'card resume press', onclick: () => go('train') }, workoutBadge(S.active.workout),
-      h('div', { class: 'grow' }, h('div', { class: 'eyebrow live-text' }, '● Workout in progress'), h('div', { class: 'title' }, w.name), h('div', { class: 'muted small' }, `${done} sets logged · tap to resume`)),
-      icon('chevron', 20)));
+    page.append(h('section', { class: 'card resume-wrap' },
+      h('button', { class: 'resume press', onclick: () => go('train') }, workoutBadge(S.active.workout),
+        h('div', { class: 'grow' }, h('div', { class: 'eyebrow live-text' }, '● Workout in progress'), h('div', { class: 'title' }, w.name), h('div', { class: 'muted small' }, `${done} set${done === 1 ? '' : 's'} logged · tap to resume`)),
+        icon('chevron', 20)),
+      h('div', { class: 'resume-actions' },
+        h('button', { class: 'btn small primary', onclick: () => go('train') }, 'Resume'),
+        h('button', { class: 'btn small danger-ghost', onclick: () => cancelWorkout() }, 'Discard'))));
   }
 
   // Hero: next workout
@@ -268,6 +273,17 @@ async function handleStepsHash() {
   return true;
 }
 
+// An in-progress workout with no completed sets that's over 12 h old was almost certainly started by accident.
+async function staleActiveCheck() {
+  const a = S.active; if (!a || activeDoneSets(a) > 0 || !S.settings.onboarded) return;
+  const started = a.createdAt || Date.parse(a.date) || Date.now();
+  if (Date.now() - started < 12 * 3600e3) return;
+  const w = WORKOUTS[a.workout], when = new Date(started).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  if (await confirmSheet('Unfinished workout', `${w?.name || 'A workout'} was started ${when} with no sets logged. Discard it? Nothing gets saved and Next up stays ${w?.name || a.workout}.`, 'Discard workout', true, 'Keep workout')) {
+    await discardActive(); toast('Workout discarded'); render(true);
+  }
+}
+
 async function boot() {
   const root = $('#app');
   root.append(h('main', { id: 'view' }), tabbar(), h('div', { id: 'toasts' }));
@@ -276,6 +292,7 @@ async function boot() {
   const fromShortcut = await handleStepsHash();
   if (!fromShortcut) render();
   maybeOnboard();
+  staleActiveCheck();
   window.addEventListener('hashchange', () => handleStepsHash());
   document.addEventListener('visibilitychange', () => { if (!document.hidden && app.tab === 'home') { derive(); render(true); } });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

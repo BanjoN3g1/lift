@@ -444,3 +444,12 @@ body.sheet-open #view { overflow: hidden; }
 .steps-card .bar-track { height: 6px; }
 .row.gap-s { display: flex; gap: 6px; }
 .warn-text { color: var(--yellow); }
+/* in-progress card + discard */
+.resume-wrap { border-color: rgba(48, 209, 88, .35); gap: 12px; }
+.resume-wrap .resume { display: flex; width: 100%; text-align: left; background: none; padding: 0; border: 0; color: inherit; }
+.resume-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.log-head-l { display: flex; align-items: center; gap: 4px; }
+.log-head-row > .log-title { flex: 1; min-width: 0; overflow: hidden; }
+.log-title > div { min-width: 0; overflow: hidden; }
+.log-title .title-s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-head-row > .btn, .log-head-l { flex: none; }

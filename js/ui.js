@@ -137,12 +137,12 @@ export function sheet(content, { title = '', onClose, tall = false, actions = nu
   return { close, el, body };
 }
 
-export function confirmSheet(title, msg, okLabel = 'Confirm', danger = false) {
+export function confirmSheet(title, msg, okLabel = 'Confirm', danger = false, cancelLabel = 'Cancel') {
   return new Promise((res) => {
     let val = false;
     const s = sheet(h('div', { class: 'confirm' }, h('p', { class: 'muted' }, msg)), {
       title, onClose: () => res(val),
-      actions: [h('button', { class: 'btn ghost', onclick: () => s.close() }, 'Cancel'),
+      actions: [h('button', { class: 'btn ghost', onclick: () => s.close() }, cancelLabel),
         h('button', { class: 'btn ' + (danger ? 'danger' : 'primary'), onclick: () => { val = true; s.close(); } }, okLabel)],
     });
   });
