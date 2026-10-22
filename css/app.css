@@ -503,3 +503,33 @@ body.sheet-open #view { overflow: hidden; }
 .cmp-pickers select.input { width: 100%; max-width: 100%; min-width: 0; }
 .tag-fields .row.gap-s { padding: 0; background: none; }
 .input.lock-in::placeholder { letter-spacing: normal; }
+/* v1.5 AI */
+.analyze-btn { width: 100%; }
+.ph-actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.ph-actions .abtn[disabled] { opacity: .4; }
+.ph-tip { padding: 0 4px; }
+.lock-row .ic:first-child { color: var(--yellow); }
+.small-grid { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.photo.excluded img { opacity: .25; }
+.md { display: flex; flex-direction: column; gap: 8px; font-size: 15px; line-height: 1.45; }
+.md h3 { font-size: 18px; margin: 10px 0 0; } .md h4 { font-size: 16px; margin: 6px 0 0; }
+.md ul, .md ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.md p { margin: 0; } .md hr { border: 0; border-top: 1px solid rgba(255,255,255,.1); width: 100%; }
+.log-card { gap: 10px; }
+.log-ta { min-height: 64px; font-size: 16px; }
+.link { color: var(--blue); font-weight: 600; padding: 0; background: none; font-size: inherit; }
+.rv-item { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 14px; background: rgba(255,255,255,.04); }
+.rv-name { flex: 1; font-weight: 650; }
+.rv-portion { flex: 1; font-size: 14px; height: 34px; }
+.rv-scale .chip { height: 30px; padding: 0 9px; font-size: 12px; }
+.rv-nums { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.rv-num { display: flex; flex-direction: column; gap: 2px; }
+.rv-num .input.num { width: 100%; height: 36px; font-size: 15px; padding: 0 6px; text-align: center; }
+.rv-notes { gap: 6px; padding: 12px; }
+.pill.conf-high { background: rgba(48,209,88,.18); color: var(--green); }
+.pill.conf-medium { background: rgba(255,214,10,.14); color: var(--yellow); }
+.pill.conf-low { background: rgba(255,159,10,.16); color: var(--orange); }
+.key-in { width: 100%; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 14px; }
+.settings .pad, .stack-s.pad { padding: 8px 0; }
+.row.rv-scale { width: auto; flex: none; padding: 0; background: none; gap: 4px; }
+.rv-item .row-between .input { min-width: 0; }

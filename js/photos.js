@@ -6,6 +6,9 @@ import { db } from './db.js';
 import * as E from './engine.js';
 import * as L from './photolock.js';
 import { app } from './app.js';
+import * as AI from './ai.js';
+import { EX, WORKOUTS, ROTATION } from './data.js';
+import { analyze as analyzeNutrition } from './nutrition.js';
 
 export const POSES = [{ value: 'front', label: 'Front' }, { value: 'side', label: 'Side' }, { value: 'back', label: 'Back' }, { value: 'flex', label: 'Flex' }, { value: 'other', label: 'Other' }];
 export const LIGHTS = [{ value: 'bathroom', label: 'Bathroom' }, { value: 'natural', label: 'Natural' }, { value: 'gym', label: 'Gym' }, { value: 'other', label: 'Other' }];
@@ -119,20 +122,19 @@ export function photos(body) {
   if (info.on && info.encrypt && S.photos.some((p) => p.blob && !p.enc)) encryptAllPlain().catch(() => {}); // e.g. after an import
   const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, style: 'display:none', onchange: async (e) => { hold(false); const files = [...e.target.files]; fileIn.value = ''; if (files.length) await importFiles(files); } });
   body.append(fileIn);
-  body.append(h('section', { class: 'card notice' }, icon('lock', 22), h('div', { class: 'grow small' },
-    h('div', null, 'Only on this phone: not in your camera roll, never uploaded. ', info.on ? (info.encrypt ? 'Locked & encrypted.' : 'Locked (privacy screen).') : 'Tip: add a lock below.'),
-    h('div', { class: 'muted tiny' }, 'For fair comparisons: same spot, same light, same time of day. Morning, fasted, before training is the easiest to repeat.'))));
   if (selecting) {
-    body.append(h('section', { class: 'card sel-bar' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, `${sel.size} selected`), h('div', { class: 'muted tiny' }, 'Pick a matched set (front/side/back) plus a reference if you have one. Shirtless only.')),
+    body.append(h('section', { class: 'card sel-bar' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, `${sel.size} selected`), h('div', { class: 'muted tiny' }, 'Opens the iOS share sheet. Shirtless only.')),
       h('button', { class: 'btn small ghost', onclick: () => { selecting = false; sel.clear(); app.refresh(); } }, 'Cancel'),
       h('button', { class: 'btn small primary', disabled: !sel.size, onclick: () => shareSelected() }, 'Share')));
   } else {
-    body.append(h('div', { class: 'two-btn' },
-      h('button', { class: 'btn primary', onclick: () => { hold(true); setTimeout(() => hold(false), 120000); fileIn.click(); } }, icon('image', 18), ' Add photos'),
-      h('button', { class: 'btn ghost', onclick: () => openCamera() }, icon('camera', 18), ' Take photo')));
-    body.append(h('div', { class: 'two-btn' },
-      h('button', { class: 'btn ghost', disabled: S.photos.length < 2, onclick: () => openCompare() }, icon('swap', 18), ' Compare'),
-      h('button', { class: 'btn ghost', disabled: !S.photos.length, onclick: () => { selecting = true; sel.clear(); app.refresh(); } }, icon('upload', 18), ' Share for analysis')));
+    const nRep = reportsCount();
+    body.append(h('button', { class: 'btn primary big analyze-btn', disabled: !S.photos.length, onclick: () => analyzeFlow() }, icon('bolt', 18), ' Analyze my progress'));
+    body.append(h('div', { class: 'ph-actions' },
+      h('button', { class: 'abtn press', onclick: () => { hold(true); setTimeout(() => hold(false), 120000); fileIn.click(); } }, icon('image', 20), 'Add'),
+      h('button', { class: 'abtn press', onclick: () => openCamera() }, icon('camera', 20), 'Camera'),
+      h('button', { class: 'abtn press', disabled: S.photos.length < 2, onclick: () => openCompare() }, icon('swap', 20), 'Compare'),
+      h('button', { class: 'abtn press', onclick: () => reportsSheet() }, icon('note', 20), nRep ? `Reports ${nRep}` : 'Reports'),
+      h('button', { class: 'abtn press', 'aria-label': 'More', onclick: () => moreSheet() }, icon('more', 20), 'More')));
   }
   if (!S.photos.length) {
     body.append(h('section', { class: 'card empty' }, icon('image', 34), h('div', { class: 'title-s' }, 'No photos yet'),
@@ -152,14 +154,150 @@ export function photos(body) {
         selecting ? h('span', { class: 'pick-dot' }, sel.has(p.id) ? icon('check', 14) : null) : null))));
     }
   }
-  const store = h('div', { class: 'muted tiny' }); storageLine().then((t) => (store.textContent = t));
-  body.append(h('section', { class: 'card' }, h('div', { class: 'eyebrow' }, 'Privacy & files'),
-    h('div', { class: 'two-btn' },
-      h('button', { class: 'btn ghost', onclick: () => lockSheet() }, icon('lock', 16), info.on ? ' Lock settings' : ' Set up lock'),
-      h('button', { class: 'btn ghost', disabled: !S.photos.length, onclick: () => exportPhotos() }, icon('download', 16), ' Export photos')),
-    h('label', { class: 'btn ghost file-btn' }, icon('upload', 16), ' Import a photo export…', h('input', { type: 'file', accept: 'application/json,.json', onclick: () => hold(true), onchange: async (e) => { hold(false); const f = e.target.files[0]; e.target.value = ''; if (f) await importPhotoExport(f); } })),
-    store,
-    h('div', { class: 'muted tiny' }, 'Photos are not part of the regular Back up file. Nothing about photos is ever sent over the network by this app.')));
+  if (S.photos.length) body.append(h('div', { class: 'muted tiny ph-tip' }, 'Fair comparisons: same spot, same light, same time of day (morning, fasted, before training is easiest).'));
+  const store = h('span'); storageLine().then((t) => (store.textContent = t));
+  body.append(h('button', { class: 'card notice press lock-row', onclick: () => lockSheet() }, icon('lock', 20),
+    h('div', { class: 'grow' }, h('div', { class: 'title-s' }, info.on ? (info.encrypt ? 'Locked & encrypted' : 'Locked (privacy screen)') : 'Photo lock: off'),
+      h('div', { class: 'muted tiny' }, 'Only on this phone. Photos leave it only when you tap Analyze (to Anthropic) or Share/Export. ', store)), icon('chevron', 18)));
+}
+function moreSheet() {
+  const s = sheet(h('div', { class: 'settings' }, h('div', { class: 'group' },
+    h('button', { class: 'btn ghost', disabled: !S.photos.length, onclick: () => { s.close(); selecting = true; sel.clear(); app.refresh(); } }, icon('upload', 16), ' Share photos via iOS share sheet'),
+    h('button', { class: 'btn ghost', disabled: !S.photos.length, onclick: () => { s.close(); exportPhotos(); } }, icon('download', 16), ' Export photos (unencrypted file)'),
+    h('label', { class: 'btn ghost file-btn' }, icon('upload', 16), ' Import a photo export…', h('input', { type: 'file', accept: 'application/json,.json', onclick: () => hold(true), onchange: async (e) => { hold(false); const f = e.target.files[0]; e.target.value = ''; s.close(); if (f) await importPhotoExport(f); } })),
+    h('button', { class: 'btn ghost', onclick: () => { s.close(); AI.aiSettingsSheet(); } }, icon('bolt', 16), ' AI (Claude) settings')),
+    h('div', { class: 'note muted small' }, 'Photos are not part of the regular Back up file.')), { title: 'Photos' });
+}
+
+// ───────────────────────── AI progress analysis (v1.5): auto-picks a timeline set, sends it to Claude, saves the report on-device
+const CAP = 14, AI_EDGE = 1024;
+export function pickSet(list = S.photos) {
+  const ps = [...list].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const chosen = new Map(); const add = (p, why) => { if (!chosen.has(p.id) && chosen.size < CAP) chosen.set(p.id, { p, why }); };
+  const nonref = ps.filter((p) => !p.ref);
+  if (nonref.length) {
+    const lastDate = nonref.at(-1).date;
+    const cutoff = E.dayKey(new Date(new Date(lastDate + 'T12:00') - 14 * E.DAY));
+    for (const pose of POSES.map((x) => x.value)) { const p = nonref.filter((x) => x.pose === pose && x.date >= cutoff).at(-1); if (p) add(p, 'newest'); }
+  }
+  for (const p of ps.filter((x) => x.ref).reverse().slice(0, 6)) add(p, 'reference');
+  const rest = nonref.filter((p) => !chosen.has(p.id));
+  if (rest.length) {
+    const span = (new Date(nonref.at(-1).date) - new Date(nonref[0].date)) / E.DAY;
+    const per = span > 730 ? (d) => d.slice(0, 4) : span > 180 ? (d) => `${d.slice(0, 4)}-Q${Math.floor((+d.slice(5, 7) - 1) / 3) + 1}` : span > 45 ? (d) => d.slice(0, 7) : (d) => E.dayKey(E.weekStart(new Date(d + 'T12:00')));
+    const groups = new Map();
+    for (const p of rest) { const k = per(p.date); if (!groups.has(k)) groups.set(k, new Map()); groups.get(k).set(p.pose, p); } // latest per pose per period
+    const keys = [...groups.keys()].sort();
+    const order = []; // oldest first, then spread evenly through the middle, newest last
+    const n = keys.length; const seen = new Set();
+    for (const f of [0, 1, 0.5, 0.25, 0.75, 0.125, 0.375, 0.625, 0.875]) { const i = Math.round(f * (n - 1)); if (!seen.has(i)) { seen.add(i); order.push(i); } }
+    for (let i = 0; i < n; i++) if (!seen.has(i)) order.push(i);
+    for (const i of order) for (const p of groups.get(keys[i]).values()) add(p, 'period ' + keys[i]);
+  }
+  return [...chosen.values()].sort((a, b) => (a.p.ts || 0) - (b.p.ts || 0));
+}
+async function toAIImage(p) {
+  const src = await createImageBitmap(await blobOf(p));
+  const sc = Math.min(1, AI_EDGE / Math.max(src.width, src.height));
+  const c = h('canvas', { width: Math.round(src.width * sc), height: Math.round(src.height * sc) });
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); src.close?.();
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
+  return (await blobToDataURL(blob)).split(',')[1];
+}
+function photoLine(p, i) {
+  const bw = nearestWeight(p.date);
+  return `Photo ${i + 1}: date ${p.date} · pose ${lab(POSES, p.pose) || p.pose}${p.ref ? ' · REFERENCE (a past photo Sal considers good shape)' : ''} · time of day ${p.ts ? fmtTime(p.ts) : 'unknown'}${p.tsSrc === 'upload' ? ' (time added, not taken: treat as unknown)' : ''} · lighting ${lab(LIGHTS, p.light) || 'not tagged'} · ${lab(FED, p.fed) || 'food state not tagged'} · post-workout pump: ${p.post == null ? 'not tagged' : p.post ? 'yes' : 'no'}${bw ? ` · nearest logged bodyweight ${bw}` : ' · no bodyweight logged near this date'}${p.note ? ` · note: ${p.note}` : ''}`;
+}
+function contextText() {
+  const n = S.settings.nutrition;
+  const rot = [...new Set(ROTATION)].map((id) => { const w = WORKOUTS[id]; return `${id} ${w.name}: ${w.blocks.flat().map((b) => EX[b.ex]?.name || b.ex).join(', ')}`; }).join('\n');
+  const ws = S.body.filter((b) => b.weight > 0);
+  const bw = ws.length ? `Bodyweight log: latest ${ws.at(-1).weight} ${ws.at(-1).wUnit || 'lb'} on ${ws.at(-1).date}${ws.length > 1 ? `; first ${ws[0].weight} ${ws[0].wUnit || 'lb'} on ${ws[0].date}` : ''}.` : 'No bodyweight logged in the app.';
+  let wk = ''; try { const a = analyzeNutrition('week'); if (a.logged) wk = `Last 7 days of food logs: ${a.logged} days logged, avg protein ${Math.round(a.comps.p?.v || 0)} g${a.comps.kcal ? `, avg ${Math.round(a.comps.kcal.v)} kcal` : ''}.`; } catch {}
+  const done = S.sessions.filter((x) => x.status === 'done');
+  return `ABOUT SAL: 30-year-old man, 5'4" (163 cm), about 145 lb. Desk job (investment banking), often under 5k steps/day. Detrained from May 2026, restarted lifting recently. Previous lifts: squat/deadlift 225 lb × 5–6, bench 145 × 3–4.
+GOAL: a lean, athletic, aesthetic look (think Tom Holland), not bulky. Priorities: delts/shoulders, upper chest, arms, abs/obliques (the "Adonis belt" V-lines).
+TRAINING: rotating plan A, B1, C, D, A, B2, C, D (done in order), 45–60 min sessions, RIR-based double progression. ${done.length} sessions logged in the app${done.length ? `, last on ${done.map((x) => x.date.slice(0, 10)).sort().at(-1)}` : ''}.
+${rot}
+NUTRITION: recomp. Targets ${n.kcalTrain} kcal on training days / ${n.kcalRest} on rest days, protein ${n.protein} g (floor ${n.proteinFloor} g), fat ≥ ${n.fatMin} g, fiber ~${n.fiber} g. Tends to eat little during the day and a big dinner. ${wk}
+${bw}`;
+}
+const ANALYSIS_SYSTEM = `You are an experienced, honest physique coach reviewing a client's progress photos. Be specific, practical and encouraging without flattery.
+Hard rules:
+- Non-medical. Do not diagnose or comment on any medical or surgical topic: no remarks on chest tissue, scars, skin, moles, posture disorders, hormones or health conditions. Judge the chest only on muscular development and leanness. If something looks medical, say only that it's outside the scope of a photo review.
+- Comment only on physique: muscle development, proportions, leanness, symmetry. Ignore anything else in the photos.
+- Body fat: give a visual RANGE (e.g. "about 14–17%"), a confidence level (low/medium/high) and why. Never a single precise number.
+- Account for conditions on every comparison: lighting (bathroom/overhead light exaggerates or hides definition), time of day, post-workout pump, fasted vs after eating, pose and camera distance. Call out when a difference is probably conditions, not real change.
+- Suggestions are options Sal can choose to adopt. Never say his plan has been changed. Phrase them as "Consider…" with the reason, tied to his priorities and his current rotation.
+Output Markdown with these sections (## headings): Summary (3 bullets) · Changes over time (better / worse / unclear, with photo numbers) · Now vs your reference photos · Body fat estimate · Strongest and lagging areas · How conditions affect these comparisons · Suggested focus (options to consider) · Tips for the next photo set. About 600–1000 words.`;
+async function analyzeFlow() {
+  if (!(await AI.hasKey())) {
+    const s = sheet(h('div', { class: 'stack' }, AI.setupPrompt('Progress analysis uses your own Claude API key. Paste it once in Settings → AI (Claude).'),
+      h('div', { class: 'muted small' }, 'Until then you can still compare photos side by side, or share a set manually from More.')), { title: 'Analyze my progress' });
+    return;
+  }
+  let set = pickSet();
+  const off = new Set();
+  const grid = h('div', { class: 'photo-grid small-grid' });
+  const btn = h('button', { class: 'btn primary', onclick: () => run() });
+  const draw = () => {
+    grid.replaceChildren(...set.map(({ p, why }) => h('button', { class: 'photo press' + (p.ref ? ' ref' : '') + (off.has(p.id) ? ' excluded' : ''), onclick: () => { off.has(p.id) ? off.delete(p.id) : off.add(p.id); draw(); } },
+      pimg(p), h('span', { class: 'photo-tag' }, `${p.date.slice(2)} ${lab(POSES, p.pose) || p.pose}`), p.ref ? h('span', { class: 'ref-badge' }, '★') : null, off.has(p.id) ? h('span', { class: 'pick-dot' }, icon('close', 12)) : null)));
+    const n = set.length - off.size; btn.textContent = `Send ${n} photo${n === 1 ? '' : 's'} to Claude`; btn.disabled = !n;
+  };
+  draw();
+  const st = await AI.aiStatus();
+  const s = track(sheet(h('div', { class: 'stack' },
+    h('div', { class: 'small' }, `Auto-picked ${set.length} of ${S.photos.length}: your newest set, reference photos, and one per pose for each period so the timeline is covered. Tap a photo to leave it out.`),
+    grid,
+    h('div', { class: 'pill warn soft' }, `These photos (resized to ${AI_EDGE} px, no location data), their tags, and your profile, plan and targets go to Anthropic (${st.model}). Shirtless photos only.`),
+    h('div', { class: 'muted tiny' }, 'Typical cost with Sonnet: a few cents per analysis, billed to your Anthropic account. The report is saved only on this phone.')), { title: 'Analyze my progress', tall: true, actions: [btn] }));
+  async function run() {
+    const use = set.filter(({ p }) => !off.has(p.id)).map((x) => x.p);
+    const encKey = L.currentKey(), mustEnc = !!L.lockInfo().encrypt;
+    btn.disabled = true; btn.textContent = 'Preparing photos…';
+    try {
+      const content = [{ type: 'text', text: contextText() + `
+
+PHOTOS (${use.length}, oldest first). Each photo is preceded by its tags.` }];
+      for (const [i, p] of use.entries()) { content.push({ type: 'text', text: photoLine(p, i) }); content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await toAIImage(p) } }); }
+      content.push({ type: 'text', text: `Today is ${E.dayKey()}. Write the analysis now.` });
+      btn.textContent = 'Claude is analyzing… (up to a minute)';
+      const r = await AI.ask({ system: ANALYSIS_SYSTEM, content, maxTokens: 16000, timeoutMs: 240000 });
+      if (!r.text) throw new Error('Claude returned an empty report.');
+      const rep = await saveReport({ text: r.text, model: r.model, photoIds: use.map((p) => p.id), photoMeta: use.map((p, i) => photoLine(p, i)), usage: r.usage }, mustEnc ? encKey : null);
+      if (L.isLocked()) { toast('Progress report saved. Unlock Photos to read it.', { icon: 'lock', ms: 4000 }); return; }
+      s.close(); haptic('success'); viewReport(rep, r.text); app.refresh();
+    } catch (e) { toast(e.message, { tone: 'bad', ms: 5000 }); btn.disabled = false; draw(); }
+  }
+}
+// Reports: kv 'photoReports'. Text is encrypted with the photo key when encryption is on.
+async function getReports() { return (await db.get('kv', 'photoReports'))?.v || []; }
+let repCount = 0; getReports().then((r) => (repCount = r.length)).catch(() => {});
+const reportsCount = () => repCount;
+async function saveReport({ text, ...meta }, encKey) {
+  const list = await getReports();
+  const rep = { id: 'r' + Date.now().toString(36), at: Date.now(), date: E.dayKey(), n: meta.photoIds.length, ...meta };
+  if (encKey) rep.enc = await L.encryptText(text, encKey); else rep.text = text;
+  list.push(rep); await db.put('kv', { k: 'photoReports', v: list }); repCount = list.length;
+  return rep;
+}
+async function reportText(r) { return r.enc ? L.decryptText(r.enc) : r.text; }
+async function reportsSheet() {
+  const list = (await getReports()).sort((a, b) => b.at - a.at);
+  const s = track(sheet(h('div', { class: 'stack' }, list.length ? h('div', { class: 'list' }, list.map((r) => h('button', { class: 'row press', onclick: async () => { s.close(); viewReport(r, await reportText(r)); } },
+    h('div', { class: 'grow' }, h('div', { class: 'title-s' }, new Date(r.at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('div', { class: 'muted tiny' }, `${r.n} photos · ${r.model}${r.enc ? ' · encrypted' : ''}`)), icon('chevron', 18))))
+    : h('div', { class: 'muted small pad' }, 'No analyses yet. Tap “Analyze my progress”. Every report is saved here, only on this phone.')), { title: 'Progress reports', tall: true }));
+}
+function viewReport(r, text) {
+  const thumbs = h('div', { class: 'cmp-thumbs' }, (r.photoIds || []).map((id) => S.photos.find((p) => p.id === id)).filter(Boolean).map((p) => h('div', { class: 'cmp-thumb' }, pimg(p), h('span', null, p.date.slice(5)))));
+  const s = track(sheet(h('div', { class: 'stack report' },
+    h('div', { class: 'muted tiny' }, `${new Date(r.at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${r.n} photos · ${r.model}`),
+    thumbs, AI.md(text),
+    h('div', { class: 'muted tiny' }, 'AI visual estimate, not a measurement or medical advice. Nothing in your plan changes unless you decide to change it.')), {
+    title: 'Progress report', tall: true,
+    actions: [h('button', { class: 'btn danger-ghost', onclick: async () => { if (!(await confirmSheet('Delete this report?', 'It’s removed from this phone.', 'Delete', true))) return; const list = (await getReports()).filter((x) => x.id !== r.id); await db.put('kv', { k: 'photoReports', v: list }); repCount = list.length; s.close(); app.refresh(); } }, icon('trash', 16), ' Delete'),
+      h('button', { class: 'btn ghost', onclick: () => { navigator.clipboard?.writeText(text).then(() => toast('Copied', { icon: 'check' })).catch(() => toast('Couldn’t copy')); } }, 'Copy text')] }));
 }
 function condSummary(ps) {
   const one = (f) => { const vs = [...new Set(ps.map(f))]; return vs.length === 1 ? vs[0] : null; };
@@ -497,4 +635,4 @@ export function openCamera() {
   function close() { stream?.getTracks().forEach((t) => t.stop()); root.classList.remove('open'); setTimeout(() => root.remove(), 300); }
   start();
 }
-export const _test = { exifDate, captionFor, fairness, encryptAllPlain };
+export const _test = { exifDate, captionFor, fairness, encryptAllPlain, pickSet, contextText, ANALYSIS_SYSTEM };

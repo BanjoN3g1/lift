@@ -89,3 +89,10 @@ export async function unlockWithFaceId() {
   unlockedPlain = true; emit(); return true;
 }
 export async function removeFaceId() { if (cfg) { delete cfg.wa; await saveCfg(); } }
+
+// Generic text encryption with the data key (used for the AI key and photo reports when encryption is on)
+export async function encryptText(str, key = dek) { const iv = rand(12); return { iv: b64(iv), ct: b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, te.encode(str))) }; }
+export const currentKey = () => (cfg?.encrypt ? dek : null); // captured before long async work so a relock mid-way can't cause a plaintext save
+export async function decryptText(e) { return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(e.iv) }, dek, unb64(e.ct))); }
+export const canEncrypt = () => !!cfg?.encrypt && !!dek;
+export const hasDek = () => !!dek;

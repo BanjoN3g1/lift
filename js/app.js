@@ -8,6 +8,7 @@ import { renderBody } from './body.js';
 import { maybeOnboard } from './onboarding.js';
 import { activeDoneSets, discardActive } from './store.js';
 import { renderNutrition, targetsSheet } from './nutrition.js';
+import { aiSettingsSheet } from './ai.js';
 import { nTotals, kcalTarget, isTrainingDay, mealFor, nDay, putNDay, parseSteps, setSteps, LOW_STEPS } from './store.js';
 
 export const app = { tab: 'home', go, refresh: () => render(true) };
@@ -219,6 +220,9 @@ export function openSettings() {
       numRow('Deload every', 'deloadEvery', 'weeks', { def: 7 }),
       h('div', { class: 'form-row' }, h('span', null, 'Deload now'), toggle(!!st.deload?.active, async (v) => { st.deload = v ? { active: true, remaining: 4, lastEnd: st.deload?.lastEnd || null } : { active: false, remaining: 0, lastEnd: Date.now() }; await saveSettings(); derive(); app.refresh(); })),
       Object.keys(st.swaps || {}).length ? h('button', { class: 'btn ghost', onclick: async () => { st.swaps = {}; await saveSettings(); toast('Saved swaps cleared'); } }, `Reset ${Object.keys(st.swaps).length} saved exercise swap(s)`) : null),
+    h('div', { class: 'group-title' }, 'AI (Claude)'),
+    h('div', { class: 'group' }, h('button', { class: 'btn ghost', onclick: () => aiSettingsSheet() }, icon('bolt', 16), ' AI (Claude): API key & model'),
+      h('div', { class: 'note muted small' }, 'Optional. Powers food-text logging and photo progress analysis with your own Anthropic key.')),
     h('div', { class: 'group-title' }, 'Your data'),
     h('div', { class: 'group' },
       h('div', { class: 'note muted small' }, icon('lock', 13), ' Workouts, body stats and photos are stored only on this phone (IndexedDB). Nothing is uploaded automatically. Deleting the app or clearing Safari data erases it — keep a backup.'),

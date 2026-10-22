@@ -4,6 +4,7 @@ import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, segmented, toggle, 
 import { S, saveSettings, nDay, putNDay, nTotals, isTrainingDay, kcalTarget, mealFor, WINDOWS, winOf, today, U, stepsFor, setSteps, parseSteps, LOW_STEPS } from './store.js';
 import * as E from './engine.js';
 import { app } from './app.js';
+import * as AI from './ai.js';
 
 const MEALS = WINDOWS;
 const GROUPS = [...WINDOWS, { value: 'unspecified', label: 'Unspecified', range: 'no time window set' }];
@@ -15,7 +16,7 @@ function winPicker(value, onChange) {
 }
 const SRC = {
   usda: { label: 'USDA FNDDS', cls: 'usda' }, off: { label: 'Open Food Facts · user-contributed', cls: 'off' },
-  quick: { label: 'Quick add', cls: 'quick' }, fav: { label: 'Favorite', cls: 'fav' }, my: { label: 'My foods', cls: 'fav' }, custom: { label: 'Your entry', cls: 'quick' },
+  quick: { label: 'Quick add', cls: 'quick' }, ai: { label: 'Claude estimate', cls: 'off' }, local: { label: 'USDA match', cls: 'usda' }, fav: { label: 'Favorite', cls: 'fav' }, my: { label: 'My foods', cls: 'fav' }, custom: { label: 'Your entry', cls: 'quick' },
 };
 const r0 = (v) => Math.round(+v || 0);
 const r1 = (v) => Math.round((+v || 0) * 10) / 10;
@@ -120,6 +121,7 @@ function dayView(body, k) {
       h('button', { class: 'pill tiny day-type ' + (train ? 'train' : ''), onclick: async () => { d.training = !train; await putNDay(d); haptic('light'); rerender(); } },
         (train ? 'Training day' : 'Rest day') + (d.training == null ? ' · auto' : ' · set'), ' ⇄')),
     h('button', { class: 'icon-btn', 'aria-label': 'Next day', disabled: k >= today(), onclick: () => { app.nutDay = shiftDay(k, 1); rerender(); } }, icon('chevron', 20))));
+  body.append(logCard(k));
   // Rings
   const kLeft = kt - tot.kcal;
   body.append(h('section', { class: 'card nut-rings' },
@@ -137,14 +139,13 @@ function dayView(body, k) {
   body.append(stepsCard(k));
   // Quick add + actions
   body.append(h('section', { class: 'card' },
-    h('div', { class: 'eyebrow' }, 'Quick add'),
+    h('div', { class: 'eyebrow' }, 'Other ways to log'),
     h('div', { class: 'quick-grid' },
       h('button', { class: 'qbtn press', onclick: () => quickAdd(k, 'p') }, h('b', null, '+ Protein'), h('span', { class: 'muted tiny' }, 'grams only')),
       h('button', { class: 'qbtn press', onclick: () => quickAdd(k, 'kcal') }, h('b', null, '+ Calories'), h('span', { class: 'muted tiny' }, 'kcal only')),
       h('button', { class: 'qbtn press', onclick: () => quickAdd(k, 'both') }, h('b', null, '+ Both'), h('span', { class: 'muted tiny' }, 'kcal + protein'))),
     favChips(k),
     h('div', { class: 'action-grid' },
-      h('button', { class: 'abtn press', onclick: () => searchSheet(k) }, icon('note', 20), 'Search food'),
       h('button', { class: 'abtn press', onclick: () => myFoodsSheet(k) }, icon('trophy', 20), 'My foods'),
       h('button', { class: 'abtn press', onclick: () => barcodeSheet(k) }, icon('plates', 20), 'Barcode'),
       h('button', { class: 'abtn press', onclick: () => drinksSheet(k) }, icon('drop', 20), 'Drinks'),
@@ -778,3 +779,123 @@ export function analyzeSheet(k = today(), mode = 'day') {
   }
 }
 export const _test = { offSearch, offBarcode, searchLocal, analyze, scoreDay, rememberFood };
+
+// ───────────────────────── Free-text logging (v1.5): "2 eggs, Fairlife shake, chicken pad thai from Thai restaurant"
+// With a Claude key: grounded estimate (local USDA FNDDS + My foods candidates passed as reference). Without: local USDA match.
+const QTY_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, half: 0.5, couple: 2 };
+export function splitFoods(text) { return String(text).split(/[,;\n+]|\s&\s/).map((x) => x.trim()).filter(Boolean).slice(0, 12); }
+function qtyOf(seg) {
+  const m = seg.match(/^(\d+(?:\.\d+)?|\d+\/\d+|a|an|one|two|three|four|half|couple)\b\s*(?:of\s+)?/i);
+  if (!m) return { qty: 1, rest: seg, given: false };
+  const t = m[1].toLowerCase(); const q = t.includes('/') ? t.split('/').reduce((a, b) => +a / +b) : QTY_WORDS[t] ?? +t;
+  return { qty: q || 1, rest: seg.slice(m[0].length).trim() || seg, given: true };
+}
+const cleanQ = (s) => s.replace(/\b(from|at|the|some|of|with|my|a|an|restaurant|thai|place|large|small|medium|big)\b/gi, (w) => (/thai/i.test(w) ? w : ' ')).replace(/\s+/g, ' ').trim();
+export async function groundingFor(text) {
+  const all = await foods();
+  const out = [];
+  for (const seg of splitFoods(text)) {
+    const { rest } = qtyOf(seg);
+    const q = cleanQ(rest);
+    const mine = matchMyFoods(q).slice(0, 2);
+    const usda = searchLocal(q, all, 3).map(fromFNDDS);
+    let off = [];
+    if (!mine.length && !usda.length && navigator.onLine) off = await Promise.race([offSearch(q).then((r) => r.slice(0, 1)).catch(() => []), new Promise((r) => setTimeout(() => r([]), 3500))]);
+    out.push({ seg, q, mine, usda, off });
+  }
+  return out;
+}
+function refLines(g) {
+  const L = [];
+  for (const x of g) {
+    L.push(`For "${x.seg}":`);
+    for (const f of x.mine) L.push(`  - My foods (Sal's own saved item) "${f.name}", per serving (${f.serving}): ${f.kcal ?? '?'} kcal, protein ${f.p} g, fat ${f.f} g, carbs ${f.c} g, fiber ${f.fb} g`);
+    for (const f of [...x.usda, ...x.off]) L.push(`  - ${f.src === 'off' ? 'Open Food Facts (crowd-sourced label)' : 'USDA FNDDS'} "${f.name}", per 100 g: ${r0(f.per100.kcal)} kcal, protein ${r1(f.per100.p)} g, fat ${r1(f.per100.f)} g, carbs ${r1(f.per100.c)} g, fiber ${r1(f.per100.fb)} g` + (f.portions?.length ? `; portions: ${f.portions.slice(0, 3).map(([d, g]) => `${d} = ${r0(g)} g`).join(', ')}` : ''));
+    if (!x.mine.length && !x.usda.length && !x.off.length) L.push('  - (no local reference found)');
+  }
+  return L.join('\n');
+}
+const ITEM_SCHEMA = { type: 'object', additionalProperties: false, required: ['name', 'portion', 'grams', 'kcal', 'protein_g', 'fat_g', 'carbs_g', 'fiber_g', 'confidence', 'assumptions', 'reference_used'],
+  properties: { name: { type: 'string' }, portion: { type: 'string' }, grams: { type: 'number' }, kcal: { type: 'number' }, protein_g: { type: 'number' }, fat_g: { type: 'number' }, carbs_g: { type: 'number' }, fiber_g: { type: 'number' },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] }, assumptions: { type: 'string' }, reference_used: { type: 'string' } } };
+export const FOOD_SCHEMA = { type: 'object', additionalProperties: false, required: ['items', 'included', 'not_included', 'notes'],
+  properties: { items: { type: 'array', items: ITEM_SCHEMA }, included: { type: 'array', items: { type: 'string' } }, not_included: { type: 'array', items: { type: 'string' } }, notes: { type: 'string' } } };
+const FOOD_SYSTEM = `You estimate nutrition for a food log. The user is a 30-year-old man (5'4", ~145 lb) doing a body recomposition; accuracy matters more than optimism.
+Rules:
+- Split the text into separate foods/drinks. Honor any quantity or size the user states. Otherwise assume a typical US portion; for restaurant dishes assume a typical US restaurant serving (they are large and usually cooked with oil).
+- Use the REFERENCE values when they plausibly match (prefer "My foods" items: they are the user's own saved numbers). Say which reference you used in reference_used, or "none".
+- Numbers are for the whole portion eaten. grams = your best estimate of the edible weight.
+- confidence: high for packaged/labelled items or the user's saved foods; medium for simple home foods; low for restaurant/mixed dishes or vague text.
+- assumptions: one short sentence (portion size, preparation, what is assumed).
+- included: things you counted (e.g. "cooking oil in the pad thai", "peanuts and sauce"). not_included: plausible extras you did NOT count (e.g. "extra sauce", "drink with meal").
+- No health or medical advice. Output only the JSON.`;
+export async function estimateText(text) {
+  const g = await groundingFor(text);
+  if (!(await AI.hasKey())) return localEstimate(g);
+  const r = await AI.ask({ system: FOOD_SYSTEM, schema: FOOD_SCHEMA, maxTokens: 6000,
+    content: [{ type: 'text', text: `FOOD LOG TEXT:\n${text}\n\nREFERENCE (local database lookups; may be imperfect matches):\n${refLines(g)}` }] });
+  const j = r.json;
+  return { source: 'ai', model: r.model, included: j.included || [], not_included: j.not_included || [], notes: j.notes || '',
+    items: (j.items || []).map((x) => ({ name: x.name, portion: x.portion, grams: +x.grams || null, kcal: r0(x.kcal), p: r1(x.protein_g), f: r1(x.fat_g), c: r1(x.carbs_g), fb: r1(x.fiber_g), conf: x.confidence, assumptions: x.assumptions, ref: x.reference_used })) };
+}
+function localEstimate(g) {
+  const items = g.map(({ seg, mine, usda, off }) => {
+    const { qty } = qtyOf(seg);
+    if (mine[0]) { const f = mine[0]; return { name: f.name, portion: `${qty === 1 ? '' : qty + ' × '}${f.serving}`, grams: f.grams ? f.grams * qty : null, kcal: r0((f.kcal || 0) * qty), p: r1(f.p * qty), f: r1(f.f * qty), c: r1(f.c * qty), fb: r1(f.fb * qty), conf: 'medium', assumptions: `Your saved “${f.name}” × ${qty}.`, ref: 'My foods' }; }
+    const f = usda[0] || off[0];
+    if (!f) return { name: seg, portion: '?', grams: null, kcal: 0, p: 0, f: 0, c: 0, fb: 0, conf: 'low', assumptions: 'No match in the built-in list. Enter the numbers.', ref: 'none' };
+    const [pl, pg] = f.portions?.[0] || ['100 g', 100]; const gr = pg * qty, m = gr / 100;
+    return { name: f.name, portion: `${qty} × ${pl}`, grams: r0(gr), kcal: r0(f.per100.kcal * m), p: r1(f.per100.p * m), f: r1(f.per100.f * m), c: r1(f.per100.c * m), fb: r1(f.per100.fb * m), conf: 'low', assumptions: `Closest USDA match for “${seg}”, ${qty} × ${pl}. Check the portion.`, ref: f.src === 'off' ? 'Open Food Facts' : 'USDA FNDDS' };
+  });
+  return { source: 'local', items, included: [], not_included: ['Cooking oil, sauces and dressings unless the match includes them'], notes: 'Matched on this phone against the USDA list (no AI).' };
+}
+function logCard(k) {
+  let meal = mealFor();
+  const ta = h('textarea', { class: 'input ta log-ta', rows: 2, placeholder: 'What did you eat? e.g. 2 eggs, Fairlife shake, chicken pad thai from a Thai place', autocapitalize: 'sentences' });
+  const btn = h('button', { class: 'btn primary', onclick: async () => {
+    const text = ta.value.trim(); if (!text) { ta.focus(); return; }
+    btn.disabled = true; const label = btn.textContent; btn.textContent = 'Estimating…';
+    try { const res = await estimateText(text); reviewSheet(k, res, meal, text, () => (ta.value = '')); }
+    catch (e) { toast(e.message, { tone: 'bad', ms: 4500 }); if (e.code === 'nokey' || /key/i.test(e.message)) AI.aiSettingsSheet(); }
+    finally { btn.disabled = false; btn.textContent = label; }
+  } }, 'Estimate');
+  const hint = h('div', { class: 'muted tiny' });
+  AI.aiStatus().then((st) => { btn.textContent = st.hasKey ? 'Estimate with Claude' : 'Estimate (on-device match)'; hint.replaceChildren(st.hasKey ? 'Sends just this text plus local database matches to Anthropic. You review before anything is saved.' : h('span', null, 'No AI key: matches the built-in USDA list. ', h('button', { class: 'link', onclick: () => AI.aiSettingsSheet() }, 'Add a Claude key'), ' for smarter estimates.')); });
+  return h('section', { class: 'card log-card' }, h('div', { class: 'eyebrow' }, 'Log food'), ta, winPicker(meal, (v) => (meal = v)), btn, hint);
+}
+function reviewSheet(k, res, meal, text, onSaved) {
+  const items = res.items.map((x) => ({ ...x }));
+  const totalsEl = h('div', { class: 'rv-totals' });
+  const list = h('div', { class: 'list' });
+  const drawTotals = () => { const t = items.reduce((a, x) => ({ kcal: a.kcal + (+x.kcal || 0), p: a.p + (+x.p || 0), f: a.f + (+x.f || 0), c: a.c + (+x.c || 0), fb: a.fb + (+x.fb || 0) }), { kcal: 0, p: 0, f: 0, c: 0, fb: 0 });
+    totalsEl.replaceChildren(h('div', { class: 'big-num' }, String(r0(t.kcal)), h('span', { class: 'muted small' }, ' kcal')), h('div', { class: 'macro-row' }, [['Protein', t.p], ['Fat', t.f], ['Carbs', t.c], ['Fiber', t.fb]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, r1(v)), h('div', { class: 'stat-l muted tiny' }, l + ' g'))))); };
+  const num = (x, key) => h('label', { class: 'rv-num' }, h('span', { class: 'muted tiny' }, { kcal: 'kcal', p: 'P g', f: 'F g', c: 'C g', fb: 'Fib g' }[key]),
+    h('input', { class: 'input num', inputmode: 'decimal', value: x[key] ?? '', oninput: (e) => { x[key] = +String(e.target.value).replace(',', '.') || 0; drawTotals(); } }));
+  const draw = () => list.replaceChildren(...items.map((x, i) => h('div', { class: 'rv-item' },
+    h('div', { class: 'row-between' }, h('input', { class: 'input rv-name', value: x.name, oninput: (e) => (x.name = e.target.value) }),
+      h('button', { class: 'icon-btn', 'aria-label': 'Remove item', onclick: () => { items.splice(i, 1); draw(); drawTotals(); } }, icon('trash', 16))),
+    h('div', { class: 'row-between' }, h('input', { class: 'input rv-portion', value: x.portion || '', placeholder: 'Portion', oninput: (e) => (x.portion = e.target.value) }),
+      h('div', { class: 'row gap-s rv-scale' }, [0.5, 1.5, 2].map((m) => h('button', { class: 'chip press', onclick: () => { for (const key of ['kcal', 'p', 'f', 'c', 'fb']) x[key] = key === 'kcal' ? r0(x[key] * m) : r1(x[key] * m); if (x.grams) x.grams = r0(x.grams * m); x.portion = `${m} × (${x.portion})`; draw(); drawTotals(); } }, `×${m}`)))),
+    h('div', { class: 'rv-nums' }, ['kcal', 'p', 'f', 'c', 'fb'].map((key) => num(x, key))),
+    h('div', { class: 'muted tiny' }, h('span', { class: 'pill tiny conf-' + x.conf }, `${x.conf} confidence`), ' ', x.assumptions || '', x.ref && x.ref !== 'none' ? ` · ref: ${x.ref}` : ''))));
+  draw(); drawTotals();
+  const notes = [res.included?.length ? h('div', { class: 'small' }, h('b', null, 'Included: '), res.included.join(', ')) : null,
+    res.not_included?.length ? h('div', { class: 'small' }, h('b', null, 'Not included: '), res.not_included.join(', ')) : null,
+    res.notes ? h('div', { class: 'muted tiny' }, res.notes) : null].filter(Boolean);
+  const s = sheet(h('div', { class: 'stack' },
+    h('div', { class: 'muted small' }, `“${text}”`),
+    h('span', { class: 'src ' + (res.source === 'ai' ? 'off' : 'usda') }, res.source === 'ai' ? `Estimated by Claude (${res.model}) · check portions` : 'On-device USDA match · no AI'),
+    totalsEl, list, notes.length ? h('div', { class: 'card rv-notes' }, notes) : null, winPicker(meal, (v) => (meal = v)),
+    h('div', { class: 'muted tiny' }, 'Edit anything before saving. Each item also goes to My foods so it’s one tap next time.')), {
+    title: 'Review estimate', tall: true,
+    actions: [h('button', { class: 'btn primary', onclick: async () => {
+      const keep = items.filter((x) => x.name.trim() && ((+x.kcal || 0) > 0 || (+x.p || 0) > 0));
+      if (!keep.length) { toast('Nothing to save'); return; }
+      const entries = keep.map((x) => ({ name: x.name.trim(), kcal: r0(x.kcal), p: r1(x.p), f: r1(x.f), c: r1(x.c), fb: r1(x.fb), meal, src: res.source === 'ai' ? 'ai' : 'local', est: true, qtyLabel: x.portion || '1 serving', grams: x.grams || undefined, conf: x.conf, assumptions: x.assumptions }));
+      for (const e of entries) await rememberFood(e, { edited: true });
+      s.close(); onSaved?.();
+      await addEntries(k, entries, { toast: `Logged ${entries.length} item${entries.length > 1 ? 's' : ''} · ${r0(entries.reduce((a, e) => a + e.kcal, 0))} kcal` });
+    } }, `Save ${items.length} item${items.length === 1 ? '' : 's'}`)],
+  });
+}
+Object.assign(_test, { splitFoods, groundingFor, estimateText, localEstimate });
