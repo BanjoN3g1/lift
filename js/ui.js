@@ -281,6 +281,7 @@ export function segmented(options, value, onChange, cls = '') {
     btns.forEach((b, j) => b.classList.toggle('on', j === i));
     pill.style.width = `calc(${100 / options.length}% - 4px)`;
     pill.style.transform = `translateX(calc(${i * 100}% + ${i * 4}px))`;
+    pill.style.opacity = i < 0 ? 0 : 1;
   }
   sync();
   return el;

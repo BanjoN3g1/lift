@@ -1,15 +1,21 @@
 // Nutrition tab: daily log, quick add, favorites, food search (bundled USDA FNDDS + optional Open Food Facts),
 // barcode scan, drinks, history. All logs stay in IndexedDB on this device.
 import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, segmented, toggle, ring, barChart } from './ui.js';
-import { S, saveSettings, nDay, putNDay, nTotals, isTrainingDay, kcalTarget, mealFor, today, U, stepsFor, setSteps, parseSteps, LOW_STEPS } from './store.js';
+import { S, saveSettings, nDay, putNDay, nTotals, isTrainingDay, kcalTarget, mealFor, WINDOWS, winOf, today, U, stepsFor, setSteps, parseSteps, LOW_STEPS } from './store.js';
 import * as E from './engine.js';
 import { app } from './app.js';
 
-const MEALS = [{ value: 'breakfast', label: 'Breakfast' }, { value: 'lunch', label: 'Lunch' }, { value: 'snack', label: 'Snack' }, { value: 'dinner', label: 'Dinner' }];
-const MEAL_LABEL = Object.fromEntries(MEALS.map((m) => [m.value, m.label]));
+const MEALS = WINDOWS;
+const GROUPS = [...WINDOWS, { value: 'unspecified', label: 'Unspecified', range: 'no time window set' }];
+const MEAL_LABEL = Object.fromEntries(GROUPS.map((m) => [m.value, m.label]));
+// Time-window picker used everywhere an entry is added or edited
+function winPicker(value, onChange) {
+  return h('div', { class: 'stack-s' }, h('div', { class: 'muted tiny' }, 'When (roughly)'),
+    segmented(WINDOWS.map((w) => ({ value: w.value, label: w.label })), WINDOWS.some((w) => w.value === value) ? value : null, onChange, 'win5'));
+}
 const SRC = {
   usda: { label: 'USDA FNDDS', cls: 'usda' }, off: { label: 'Open Food Facts · user-contributed', cls: 'off' },
-  quick: { label: 'Quick add', cls: 'quick' }, fav: { label: 'Favorite', cls: 'fav' }, custom: { label: 'Your entry', cls: 'quick' },
+  quick: { label: 'Quick add', cls: 'quick' }, fav: { label: 'Favorite', cls: 'fav' }, my: { label: 'My foods', cls: 'fav' }, custom: { label: 'Your entry', cls: 'quick' },
 };
 const r0 = (v) => Math.round(+v || 0);
 const r1 = (v) => Math.round((+v || 0) * 10) / 10;
@@ -139,18 +145,21 @@ function dayView(body, k) {
     favChips(k),
     h('div', { class: 'action-grid' },
       h('button', { class: 'abtn press', onclick: () => searchSheet(k) }, icon('note', 20), 'Search food'),
+      h('button', { class: 'abtn press', onclick: () => myFoodsSheet(k) }, icon('trophy', 20), 'My foods'),
       h('button', { class: 'abtn press', onclick: () => barcodeSheet(k) }, icon('plates', 20), 'Barcode'),
       h('button', { class: 'abtn press', onclick: () => drinksSheet(k) }, icon('drop', 20), 'Drinks'),
+      h('button', { class: 'abtn press', onclick: () => customFood(k) }, icon('edit', 20), 'Manual'),
       h('button', { class: 'abtn press', onclick: () => copyDay(shiftDay(k, -1), k) }, icon('swap', 20), 'Copy yesterday'))));
+  body.append(analyzeCard(k));
   // Meals
-  const groups = MEALS.map((m) => ({ ...m, items: d.entries.filter((e) => (e.meal || 'snack') === m.value).sort((a, b) => a.t - b.t) })).filter((g) => g.items.length);
+  const groups = GROUPS.map((m) => ({ ...m, items: d.entries.filter((e) => winOf(e) === m.value).sort((a, b) => a.t - b.t) })).filter((g) => g.items.length);
   if (!groups.length) body.append(h('section', { class: 'card empty' }, icon('drop', 30), h('div', { class: 'title-s' }, 'Nothing logged ' + (k === today() ? 'yet today' : 'this day')),
     h('div', { class: 'muted small' }, 'Quick-add numbers, tap a favorite, search the USDA list, or copy yesterday if you ate the same.')));
   for (const g of groups) {
     const gt = g.items.reduce((a, e) => ({ kcal: a.kcal + (+e.kcal || 0), p: a.p + (+e.p || 0) }), { kcal: 0, p: 0 });
     body.append(h('section', { class: 'card meal' },
-      h('div', { class: 'row-between' }, h('div', null, h('div', { class: 'title-s' }, g.label), h('div', { class: 'muted tiny' }, `${r0(gt.kcal)} kcal · ${r0(gt.p)} g protein`)),
-        h('button', { class: 'btn small ghost', onclick: () => repeatMeal(g.items, k) }, icon('plus', 14), k === today() ? ' Repeat' : ' Log today')),
+      h('div', { class: 'row-between' }, h('div', null, h('div', { class: 'title-s' }, g.label, h('span', { class: 'muted tiny' }, ' · ' + g.range)), h('div', { class: 'muted tiny' }, `${r0(gt.kcal)} kcal · ${r0(gt.p)} g protein`)),
+        h('button', { class: 'btn small ghost', onclick: () => repeatMeal(g.items, k, g.value === 'unspecified' ? null : g.value) }, icon('plus', 14), k === today() ? ' Repeat' : ' Log today')),
       h('div', { class: 'list' }, g.items.map((e) => entryRow(e, k)))));
   }
   const recent = recentMeals(k);
@@ -180,7 +189,8 @@ function entryRow(e, k) {
     h('div', { class: 'entry-n mono' }, h('div', null, e.kcal == null ? '—' : r0(e.kcal), h('span', { class: 'muted tiny' }, ' kcal')), h('div', { class: 'muted tiny' }, `${r0(e.p)} g P`)));
 }
 
-async function addEntries(k, items, { toast: msg } = {}) {
+async function addEntries(k, items, { toast: msg, remember } = {}) {
+  if (remember) for (const it of items) await rememberFood(it);
   const d = nDay(k);
   const base = k === today() ? Date.now() : new Date(k + 'T12:00').getTime();
   items.forEach((it, i) => d.entries.push({ ...it, id: uid() + i, t: it.keepTime && k !== today() ? it.t : base + i }));
@@ -224,7 +234,7 @@ function editSteps(k) {
 
 // ───────────────────────── Quick add + favorites
 function quickAdd(k, mode) {
-  let meal = k === today() ? mealFor() : 'snack';
+  let meal = mealFor();
   const kIn = h('input', { class: 'input num big-in', inputmode: 'numeric', placeholder: 'kcal' });
   const pIn = h('input', { class: 'input num big-in', inputmode: 'decimal', placeholder: 'g' });
   const nIn = h('input', { class: 'input', placeholder: 'What was it? (optional)' });
@@ -233,7 +243,7 @@ function quickAdd(k, mode) {
     h('div', { class: 'qa-fields' },
       mode !== 'p' ? h('label', null, h('span', { class: 'muted tiny' }, 'Calories'), kIn) : null,
       mode !== 'kcal' ? h('label', null, h('span', { class: 'muted tiny' }, 'Protein (g)'), pIn) : null),
-    nIn, segmented(MEALS, meal, (v) => (meal = v)),
+    nIn, winPicker(meal, (v) => (meal = v)),
     h('div', { class: 'form-row' }, h('span', null, 'Also save as a favorite button'), toggle(false, (v) => (fav = v)))), {
     title: mode === 'p' ? 'Add protein' : mode === 'kcal' ? 'Add calories' : 'Quick add',
     actions: [h('button', { class: 'btn primary', onclick: async () => {
@@ -250,7 +260,7 @@ function favChips(k) {
   const favs = T().favorites || [];
   return h('div', { class: 'stack-s' },
     h('div', { class: 'row-between' }, h('div', { class: 'eyebrow' }, 'Favorites'), h('button', { class: 'btn small ghost', onclick: editFavorites }, 'Edit')),
-    favs.length ? h('div', { class: 'chips' }, favs.map((f) => h('button', { class: 'chip press fav', onclick: () => addEntries(k, [{ name: f.name, kcal: f.kcal ?? null, p: +f.p || 0, c: f.c, f: f.f, fb: f.fb, meal: k === today() ? mealFor() : 'snack', src: 'fav' }], { toast: `+ ${f.name}` }) },
+    favs.length ? h('div', { class: 'chips' }, favs.map((f) => h('button', { class: 'chip press fav', onclick: () => addEntries(k, [{ name: f.name, kcal: f.kcal ?? null, p: +f.p || 0, c: f.c, f: f.f, fb: f.fb, meal: mealFor(), src: 'fav' }], { toast: `+ ${f.name}` }) },
       h('span', null, f.name), h('span', { class: 'muted tiny' }, [f.kcal != null ? `${f.kcal} kcal` : null, f.p ? `${f.p} g` : null].filter(Boolean).join(' · ')))))
       : h('div', { class: 'muted tiny' }, 'Save things you eat often (Fairlife, your usual bar, a lunch order) with the numbers from the label. Tap Edit, or flip “save as favorite” when adding.'));
 }
@@ -276,18 +286,18 @@ function editEntry(e, k) {
   const f = { kcal: h('input', { class: 'input num', inputmode: 'numeric', value: e.kcal ?? '' }), p: h('input', { class: 'input num', inputmode: 'decimal', value: e.p ?? '' }),
     c: h('input', { class: 'input num', inputmode: 'decimal', value: e.c ?? '' }), f: h('input', { class: 'input num', inputmode: 'decimal', value: e.f ?? '' }), fb: h('input', { class: 'input num', inputmode: 'decimal', value: e.fb ?? '' }) };
   const name = h('input', { class: 'input', value: e.name });
-  let meal = e.meal || 'snack';
+  let meal = winOf(e) === 'unspecified' ? null : winOf(e);
   const s = sheet(h('div', { class: 'stack' }, name, srcChip(e), e.qtyLabel ? h('div', { class: 'muted small' }, e.qtyLabel) : null,
     h('div', { class: 'group' }, [['Calories', 'kcal', 'kcal'], ['Protein', 'p', 'g'], ['Carbs', 'c', 'g'], ['Fat', 'f', 'g'], ['Fiber', 'fb', 'g']].map(([l, key, u]) =>
       h('label', { class: 'form-row' }, h('span', null, l), h('div', { class: 'with-suffix' }, f[key], h('span', { class: 'muted' }, u))))),
-    segmented(MEALS, meal, (v) => (meal = v)),
+    winPicker(meal, (v) => (meal = v)),
     h('div', { class: 'two-btn' },
       h('button', { class: 'btn ghost', onclick: async () => { T().favorites.push({ id: uid(), name: name.value, kcal: f.kcal.value === '' ? null : +f.kcal.value, p: +f.p.value || 0, c: +f.c.value || 0, f: +f.f.value || 0, fb: +f.fb.value || 0 }); await saveSettings(); toast('Saved as favorite', { icon: 'check' }); } }, 'Save as favorite'),
       h('button', { class: 'btn ghost', onclick: async () => { s.close(); await addEntries(today(), [{ ...e, id: undefined }], { toast: 'Logged again today' }); } }, 'Log again today'))), {
     title: 'Edit item',
     actions: [h('button', { class: 'btn danger-ghost', onclick: async () => { d.entries = d.entries.filter((x) => x.id !== e.id); await putNDay(d); s.close(); rerender(); toast('Removed'); } }, icon('trash', 16), ' Delete'),
       h('button', { class: 'btn primary', onclick: async () => {
-        Object.assign(e, { name: name.value.trim() || e.name, meal, kcal: f.kcal.value === '' ? null : +f.kcal.value, p: +f.p.value || 0, c: +f.c.value || 0, f: +f.f.value || 0, fb: +f.fb.value || 0 });
+        Object.assign(e, { name: name.value.trim() || e.name, meal: meal || e.meal || null, kcal: f.kcal.value === '' ? null : +f.kcal.value, p: +f.p.value || 0, c: +f.c.value || 0, f: +f.f.value || 0, fb: +f.fb.value || 0 });
         await putNDay(d); s.close(); rerender();
       } }, 'Save')],
   });
@@ -309,7 +319,7 @@ function recentMeals(k) {
   for (let i = 1; i <= 10 && out.length < 4; i++) {
     const day = shiftDay(k, -i); const d = S.nutrition[day]; if (!d) continue;
     for (const m of MEALS) {
-      const items = d.entries.filter((e) => e.meal === m.value && e.src !== 'quick');
+      const items = d.entries.filter((e) => winOf(e) === m.value && e.src !== 'quick');
       if (!items.length) continue;
       const key = items.map((e) => e.name).sort().join('|');
       if (seen.has(key)) continue; seen.add(key);
@@ -342,13 +352,16 @@ export function searchSheet(k) {
   const list = h('div', { class: 'list' });
   const offBox = h('div', { class: 'stack-s' });
   const pick = (food) => { s.close(); portionSheet(food, k); };
+  const myRows = (arr) => arr.map((f) => myFoodRow(f, k, () => s.close()));
   let t;
   const run = async () => {
     const v = q.value.trim();
     offBox.replaceChildren();
-    if (!v) { const rec = recentFoods(); list.replaceChildren(...(rec.length ? [h('div', { class: 'group-title' }, 'Recent'), ...rec.map((f) => foodRow(f, k, pick))] : [h('div', { class: 'muted small pad' }, 'About 5,300 generic & restaurant-style foods from USDA FNDDS are built in and work offline.')])); return; }
+    if (!v) { const mine = sortedMyFoods().slice(0, 8); list.replaceChildren(...(mine.length ? [h('div', { class: 'group-title' }, 'My foods'), ...myRows(mine)] : []), h('div', { class: 'muted small pad' }, 'About 5,300 generic & restaurant-style foods from USDA FNDDS are built in and work offline. Anything you log is saved to My foods.')); return; }
+    const mine = matchMyFoods(v);
     const res = searchLocal(v, await foods()).map(fromFNDDS);
-    list.replaceChildren(h('div', { class: 'group-title' }, `USDA FNDDS · ${res.length ? res.length + (res.length === 40 ? '+' : '') : 'no'} matches`), ...res.map((f) => foodRow(f, k, pick)));
+    list.replaceChildren(...(mine.length ? [h('div', { class: 'group-title' }, `My foods · ${mine.length}`), ...myRows(mine.slice(0, 8))] : []),
+      h('div', { class: 'group-title' }, `USDA FNDDS · ${res.length ? res.length + (res.length === 40 ? '+' : '') : 'no'} matches`), ...res.map((f) => foodRow(f, k, pick)));
     offBox.replaceChildren(h('button', { class: 'btn ghost', onclick: async (ev) => {
       if (!navigator.onLine) { toast('Offline — Open Food Facts needs a connection'); return; }
       ev.currentTarget.disabled = true; ev.currentTarget.textContent = 'Searching Open Food Facts…';
@@ -368,12 +381,15 @@ export function searchSheet(k) {
 function customFood(k) {
   const f = {}; const field = (key, ph) => (f[key] = h('input', { class: 'input num', inputmode: 'decimal', placeholder: ph }));
   const name = h('input', { class: 'input', placeholder: 'Name' });
-  let meal = k === today() ? mealFor() : 'snack';
+  let meal = mealFor(); let keep = true;
   const s = sheet(h('div', { class: 'stack' }, name, h('div', { class: 'group' }, [['Calories', 'kcal'], ['Protein g', 'p'], ['Carbs g', 'c'], ['Fat g', 'f'], ['Fiber g', 'fb']].map(([l, key]) => h('label', { class: 'form-row' }, h('span', null, l), field(key, '0')))),
-    h('div', { class: 'muted tiny' }, 'Values for the whole portion you ate.'), segmented(MEALS, meal, (v) => (meal = v))), {
+    h('div', { class: 'muted tiny' }, 'Values for the whole portion you ate (your best estimate is fine).'), winPicker(meal, (v) => (meal = v)),
+    h('div', { class: 'form-row' }, h('span', null, 'Save to My foods'), toggle(true, (v) => (keep = v)))), {
     title: 'Manual entry',
     actions: [h('button', { class: 'btn primary', onclick: async () => { if (!name.value.trim()) { toast('Add a name'); return; } s.close();
-      await addEntries(k, [{ name: name.value.trim(), kcal: f.kcal.value === '' ? null : +f.kcal.value, p: +f.p.value || 0, c: +f.c.value || 0, f: +f.f.value || 0, fb: +f.fb.value || 0, meal, src: 'custom' }], { toast: 'Added' }); } }, 'Add')],
+      const it = { name: name.value.trim(), kcal: f.kcal.value === '' ? null : +f.kcal.value, p: +f.p.value || 0, c: +f.c.value || 0, f: +f.f.value || 0, fb: +f.fb.value || 0, meal, src: 'custom', qtyLabel: '1 serving' };
+      if (keep) await rememberFood(it, { edited: true });
+      await addEntries(k, [it], { toast: keep ? 'Added · saved to My foods' : 'Added' }); } }, 'Add')],
   });
 }
 
@@ -382,22 +398,33 @@ export function portionSheet(food, k, { defaultPortion = 0 } = {}) {
   const units = [...food.portions.map(([d, g]) => ({ label: d, g })), { label: 'grams', g: 1, isG: true }, { label: 'oz (weight)', g: 28.35 }];
   let ui = food.portions.length ? Math.min(defaultPortion, food.portions.length - 1) : units.findIndex((u) => u.isG);
   let qty = units[ui].isG ? 100 : 1;
-  let meal = k === today() ? (food.drink ? 'snack' : mealFor()) : 'snack';
+  let meal = mealFor(); let ovr = null; // ovr = user-edited estimate for the whole portion
   const qIn = h('input', { class: 'input num huge', inputmode: 'decimal', value: qty });
   const unitSel = h('select', { class: 'input unit-sel' }, units.map((u, i) => h('option', { value: i, selected: i === ui }, u.isG ? 'grams' : `${u.label}${u.g !== 1 && !u.label.includes(' g') ? ` · ${r0(u.g)} g` : ''}`)));
   const out = h('div', { class: 'portion-out' });
   const grams = () => qty * units[ui].g;
-  const calc = () => { const g = grams() / 100, p = food.per100; return { kcal: p.kcal * g, p: p.p * g, c: p.c * g, f: p.f * g, fb: p.fb * g, al: (p.al || 0) * g }; };
+  const calc0 = () => { const g = grams() / 100, p = food.per100; return { kcal: p.kcal * g, p: p.p * g, c: p.c * g, f: p.f * g, fb: p.fb * g, al: (p.al || 0) * g }; };
+  const calc = () => (ovr ? { ...calc0(), ...ovr } : calc0());
   const draw = () => {
     const m = calc();
     out.replaceChildren(...[h('div', { class: 'big-num' }, String(r0(m.kcal)), h('span', { class: 'muted small' }, ' kcal')),
       h('div', { class: 'macro-row' }, [['Protein', m.p], ['Carbs', m.c], ['Fat', m.f], ['Fiber', m.fb]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, r1(v)), h('div', { class: 'stat-l muted tiny' }, l + ' g')))),
       m.al ? h('div', { class: 'muted tiny' }, `Includes ${r1(m.al)} g alcohol (${r0(m.al * 7)} kcal)`) : null,
-      h('div', { class: 'muted tiny' }, `${r0(grams())} g total`)].filter(Boolean));
+      h('div', { class: 'muted tiny' }, `${r0(grams())} g total` + (ovr ? ' · your edited estimate' : '')),
+      h('button', { class: 'btn small ghost', onclick: editEst }, icon('edit', 14), ovr ? ' Edit estimate again' : ' Edit estimate')].filter(Boolean));
+  };
+  const editEst = () => {
+    const m = calc(); const F = {};
+    const fld = (key, l) => h('label', { class: 'form-row' }, h('span', null, l), (F[key] = h('input', { class: 'input num', inputmode: 'decimal', value: key === 'kcal' ? r0(m[key]) : r1(m[key]) })));
+    const es = sheet(h('div', { class: 'stack' }, h('div', { class: 'muted small' }, `For ${qty} × ${units[ui].label} — overrides the database numbers for this log.`),
+      h('div', { class: 'group' }, fld('kcal', 'Calories'), fld('p', 'Protein g'), fld('c', 'Carbs g'), fld('f', 'Fat g'), fld('fb', 'Fiber g'))), {
+      title: 'Edit estimate', actions: [ovr ? h('button', { class: 'btn ghost', onclick: () => { ovr = null; es.close(); draw(); } }, 'Reset') : null,
+        h('button', { class: 'btn primary', onclick: () => { ovr = Object.fromEntries(Object.entries(F).map(([key, el]) => [key, +String(el.value).replace(',', '.') || 0])); es.close(); draw(); } }, 'Use these')].filter(Boolean) });
   };
   const step = (dir) => { const u = units[ui]; const st = u.isG ? 10 : 0.5; qty = Math.max(0, Math.round((qty + dir * st) * 100) / 100); qIn.value = qty; haptic('light'); draw(); };
   qIn.addEventListener('input', () => { qty = +qIn.value.replace(',', '.') || 0; draw(); });
-  unitSel.addEventListener('change', () => { ui = +unitSel.value; qty = units[ui].isG ? 100 : 1; qIn.value = qty; draw(); });
+  qIn.addEventListener('change', () => { if (ovr) { ovr = null; draw(); } });
+  unitSel.addEventListener('change', () => { ui = +unitSel.value; qty = units[ui].isG ? 100 : 1; qIn.value = qty; ovr = null; draw(); });
   draw();
   const s = sheet(h('div', { class: 'stack' },
     h('div', null, h('div', { class: 'title' }, food.name), srcChip(food)),
@@ -405,14 +432,16 @@ export function portionSheet(food, k, { defaultPortion = 0 } = {}) {
     food.src === 'off' ? h('div', { class: 'pill soft' }, 'User-contributed label data from Open Food Facts — check it against the package.') : null,
     food.noKcal ? h('div', { class: 'pill warn soft' }, 'No calorie value in this record — edit after adding.') : null,
     h('div', { class: 'qty-row' }, h('button', { class: 'step', onclick: () => step(-1) }, '−'), qIn, h('button', { class: 'step', onclick: () => step(1) }, '+')),
-    unitSel, out, segmented(MEALS, meal, (v) => (meal = v))), {
+    unitSel, out, winPicker(meal, (v) => (meal = v))), {
     title: 'Portion', tall: true,
     actions: [h('button', { class: 'btn primary', onclick: async () => {
       if (!(grams() > 0)) { toast('Set an amount'); return; }
       const m = calc(); s.close();
       const u = units[ui];
-      await addEntries(k, [{ name: food.name, kcal: food.noKcal ? null : r0(m.kcal), p: r1(m.p), c: r1(m.c), f: r1(m.f), fb: r1(m.fb), al: r1(m.al), meal, src: food.src, ref: food.ref, est: !!food.est,
-        grams: r1(grams()), qtyLabel: u.isG ? `${r0(qty)} g` : `${qty} × ${u.label}`, per100: food.per100, portions: food.portions }], { toast: `Added ${food.name.split(',')[0]} · ${r0(m.kcal)} kcal` });
+      const it = { name: food.name, kcal: food.noKcal && !ovr ? null : r0(m.kcal), p: r1(m.p), c: r1(m.c), f: r1(m.f), fb: r1(m.fb), al: r1(m.al), meal, src: food.src, ref: food.ref, est: !!food.est,
+        grams: r1(grams()), qtyLabel: u.isG ? `${r0(qty)} g` : `${qty} × ${u.label}`, per100: food.per100, portions: food.portions, edited: !!ovr };
+      await rememberFood(it, { edited: !!ovr });
+      await addEntries(k, [it], { toast: `Added ${food.name.split(',')[0]} · ${r0(m.kcal)} kcal` });
     } }, 'Add to log')],
   });
 }
@@ -431,7 +460,7 @@ async function drinksSheet(k) {
       const kcal = p ? (food.per100.kcal * p[1]) / 100 : food.per100.kcal;
       return h('div', { class: 'row' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, f.n), h('div', { class: 'muted tiny' }, p ? `${p[0]} · ${r0(kcal)} kcal` : `${r0(kcal)} kcal / 100 g`), srcChip(food)),
         h('button', { class: 'btn small primary', onclick: async () => { s.close(); await addEntries(k, [{ name: f.n, kcal: r0(kcal), p: r1((food.per100.p * (p?.[1] || 100)) / 100), c: r1((food.per100.c * (p?.[1] || 100)) / 100), f: 0, fb: 0, al: r1((food.per100.al * (p?.[1] || 100)) / 100),
-          meal: k === today() ? mealFor() : 'dinner', src: 'usda', ref: f.i, grams: p?.[1], qtyLabel: p ? `1 × ${p[0]}` : '100 g', per100: food.per100, portions: food.portions }], { toast: `+ ${f.n} · ${r0(kcal)} kcal` }); } }, '+1'),
+          meal: mealFor(), src: 'usda', ref: f.i, grams: p?.[1], qtyLabel: p ? `1 × ${p[0]}` : '100 g', per100: food.per100, portions: food.portions }], { toast: `+ ${f.n} · ${r0(kcal)} kcal`, remember: true }); } }, '+1'),
         h('button', { class: 'icon-btn', 'aria-label': 'Choose amount', onclick: () => { s.close(); portionSheet(food, k, { defaultPortion: pi }); } }, icon('more', 18)));
     }))), { title: 'Drinks', tall: true });
 }
@@ -482,6 +511,7 @@ export function barcodeSheet(k) {
 // ───────────────────────── History
 function history(body) {
   const n = T();
+  body.append(analyzeCard(today()));
   const days = []; for (let i = 0; i < 28; i++) days.push(shiftDay(today(), -i));
   const info = days.map((k) => ({ k, t: nTotals(k), train: isTrainingDay(k), target: kcalTarget(k) }));
   const logged = (arr) => arr.filter((d) => d.t.n > 0);
@@ -536,4 +566,215 @@ export function targetsSheet() {
     h('div', { class: 'note muted small' }, 'These are starting estimates, not facts. After 2–3 weeks of food logs and weigh-ins, compare the 7-day average calories with your weight trend in History, then nudge the targets ~100–150 kcal.'),
     h('div', { class: 'note muted small' }, 'A day counts as a training day automatically when a workout is logged on that date. Tap the day-type pill on the Day view to override it.')), { title: 'Nutrition targets', onClose: rerender });
 }
-export const _test = { offSearch, offBarcode, searchLocal };
+
+// ───────────────────────── My foods: every food you log is remembered with its per-serving estimate (stored in settings → included in backups)
+const MF = () => (T().myFoods ||= []);
+const mfKey = (f) => [f.src || '', f.ref || '', (f.name || '').trim().toLowerCase()].join('|');
+const MACROS = [['kcal', 'Calories', ''], ['p', 'Protein', 'g'], ['c', 'Carbs', 'g'], ['f', 'Fat', 'g'], ['fb', 'Fiber', 'g']];
+export async function rememberFood(it, { edited = false } = {}) {
+  if (!it?.name || it.src === 'quick' || it.src === 'fav' || it.src === 'my') return;
+  const list = MF(), key = mfKey(it), ex = list.find((f) => f.key === key);
+  const nums = { kcal: it.kcal == null ? null : r0(it.kcal), p: r1(it.p), c: r1(it.c), f: r1(it.f), fb: r1(it.fb), al: r1(it.al) };
+  if (ex) {
+    ex.uses = (ex.uses || 0) + 1; ex.lastUsed = Date.now();
+    if (!ex.edited) Object.assign(ex, nums, { serving: it.qtyLabel || ex.serving, grams: it.grams ?? ex.grams, edited });
+  } else list.push({ id: 'mf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), key, name: it.name, serving: it.qtyLabel || '1 serving', grams: it.grams ?? null, ...nums,
+    src: it.src || 'custom', ref: it.ref ?? null, est: !!it.est, uses: 1, lastUsed: Date.now(), created: Date.now(), edited });
+  await saveSettings();
+}
+export function sortedMyFoods() { return [...MF()].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0)); }
+function matchMyFoods(q) { const toks = q.toLowerCase().split(/\s+/).filter(Boolean); return sortedMyFoods().filter((f) => toks.every((t) => f.name.toLowerCase().includes(t) || (f.serving || '').toLowerCase().includes(t))); }
+const mfLine = (f, m = 1) => [`${f.kcal == null ? '—' : r0(f.kcal * m)} kcal`, `${r1(f.p * m)} g P`, f.f ? `${r1(f.f * m)} F` : null, f.c ? `${r1(f.c * m)} C` : null, f.fb ? `${r1(f.fb * m)} fiber` : null].filter(Boolean).join(' · ');
+function myEntry(f, m, meal) {
+  const x = (v) => (v == null ? null : r1(v * m));
+  return { name: f.name, kcal: f.kcal == null ? null : r0(f.kcal * m), p: x(f.p) || 0, c: x(f.c) || 0, f: x(f.f) || 0, fb: x(f.fb) || 0, al: x(f.al) || 0, meal, src: 'my', myId: f.id, origSrc: f.src, ref: f.ref, est: f.est,
+    grams: f.grams ? r1(f.grams * m) : undefined, qtyLabel: `${m === 1 ? '' : m + ' × '}${f.serving}` };
+}
+async function logMyFood(f, k, m = 1, meal = mealFor()) { f.uses = (f.uses || 0) + 1; f.lastUsed = Date.now(); await saveSettings(); await addEntries(k, [myEntry(f, m, meal)], { toast: `+ ${f.name.split(',')[0]}${m !== 1 ? ' × ' + m : ''}` }); }
+function myFoodRow(f, k, before = () => {}) {
+  return h('div', { class: 'row mf-row' },
+    h('button', { class: 'grow mf-main press', onclick: () => { before(); relogSheet(f, k); } }, h('div', { class: 'title-s' }, f.name), h('div', { class: 'muted tiny' }, `${f.serving} · ${mfLine(f)}`),
+      h('span', { class: 'src fav' }, 'My foods' + (f.edited ? ' · your estimate' : f.est ? ' · estimate' : ''))),
+    h('button', { class: 'btn small primary', 'aria-label': 'Log 1 serving', onclick: async () => { before(); await logMyFood(f, k); } }, '+1'));
+}
+export function myFoodsSheet(k) {
+  const q = h('input', { class: 'input', type: 'search', placeholder: 'Search My foods', autocomplete: 'off' });
+  const list = h('div', { class: 'list' });
+  const draw = () => {
+    const arr = q.value.trim() ? matchMyFoods(q.value.trim()) : sortedMyFoods();
+    list.replaceChildren(...(arr.length ? arr.map((f) => h('div', { class: 'mf-wrap' }, myFoodRow(f, k, () => s.close()),
+      h('button', { class: 'icon-btn mf-edit', 'aria-label': 'Edit ' + f.name, onclick: () => { s.close(); editMyFood(f, k); } }, icon('edit', 16))))
+      : [h('div', { class: 'muted small pad' }, MF().length ? 'No matches.' : 'Nothing saved yet. Every food you log from search, barcode, drinks or manual entry lands here with its estimate, so next time it’s one tap.')]));
+  };
+  q.addEventListener('input', draw); draw();
+  const s = sheet(h('div', { class: 'stack' }, q, h('div', { class: 'muted tiny' }, 'Tap +1 to log one serving now, or tap a food to pick an amount and time window. Pencil to edit or delete.'), list,
+    h('button', { class: 'btn ghost', onclick: () => { s.close(); editMyFood(null, k); } }, icon('plus', 16), ' New food')), { title: `My foods (${MF().length})`, tall: true });
+}
+function relogSheet(f, k) {
+  let m = 1, meal = mealFor();
+  const out = h('div', { class: 'portion-out' });
+  const mIn = h('input', { class: 'input num huge', inputmode: 'decimal', value: 1 });
+  const chips = h('div', { class: 'chips' });
+  const draw = () => {
+    out.replaceChildren(h('div', { class: 'big-num' }, f.kcal == null ? '—' : String(r0(f.kcal * m)), h('span', { class: 'muted small' }, ' kcal')),
+      h('div', { class: 'macro-row' }, [['Protein', f.p], ['Carbs', f.c], ['Fat', f.f], ['Fiber', f.fb]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, r1((v || 0) * m)), h('div', { class: 'stat-l muted tiny' }, l + ' g')))));
+    chips.replaceChildren(...[0.5, 1, 1.5, 2, 3].map((v) => h('button', { class: 'chip press' + (v === m ? ' on' : ''), onclick: () => { m = v; mIn.value = v; haptic('light'); draw(); } }, v + '×')));
+  };
+  mIn.addEventListener('input', () => { m = +mIn.value.replace(',', '.') || 0; draw(); });
+  draw();
+  const s = sheet(h('div', { class: 'stack' }, h('div', null, h('div', { class: 'title' }, f.name), h('div', { class: 'muted small' }, `1 serving = ${f.serving}`)),
+    h('div', { class: 'qty-row' }, h('button', { class: 'step', onclick: () => { m = Math.max(0, m - 0.5); mIn.value = m; draw(); } }, '−'), mIn, h('button', { class: 'step', onclick: () => { m += 0.5; mIn.value = m; draw(); } }, '+')),
+    h('div', { class: 'muted tiny' }, 'Servings'), chips, out, winPicker(meal, (v) => (meal = v))), {
+    title: 'Log again', tall: true,
+    actions: [h('button', { class: 'btn ghost', onclick: () => { s.close(); editMyFood(f, k); } }, icon('edit', 16), ' Edit'),
+      h('button', { class: 'btn primary', onclick: async () => { if (!(m > 0)) { toast('Set servings'); return; } s.close(); await logMyFood(f, k, m, meal); } }, 'Log')],
+  });
+}
+function editMyFood(f, k) {
+  const isNew = !f; f = f || { name: '', serving: '1 serving', kcal: null, p: 0, c: 0, f: 0, fb: 0, src: 'custom' };
+  const name = h('input', { class: 'input', value: f.name, placeholder: 'Name' });
+  const serving = h('input', { class: 'input', value: f.serving, placeholder: 'Serving, e.g. 1 bar, 1 bottle, 1 plate' });
+  const F = {};
+  const s = sheet(h('div', { class: 'stack' }, name, serving,
+    h('div', { class: 'group' }, MACROS.map(([key, l, u]) => h('label', { class: 'form-row' }, h('span', null, l), h('div', { class: 'with-suffix' }, (F[key] = h('input', { class: 'input num', inputmode: 'decimal', value: f[key] ?? '' })), h('span', { class: 'muted' }, u || 'kcal'))))),
+    h('div', { class: 'muted tiny' }, 'Numbers are per one serving. Editing marks this as your own estimate, so later logs won’t overwrite it. Past log entries keep their original numbers.')), {
+    title: isNew ? 'New food' : 'Edit food',
+    actions: [!isNew ? h('button', { class: 'btn danger-ghost', onclick: async () => {
+      if (!(await confirmSheet('Delete from My foods?', `Removes “${f.name}” from the list. Days you already logged keep it.`, 'Delete', true))) return;
+      T().myFoods = MF().filter((x) => x.id !== f.id); await saveSettings(); s.close(); toast('Deleted'); rerender(); } }, icon('trash', 16), ' Delete') : null,
+      h('button', { class: 'btn primary', onclick: async () => {
+        if (!name.value.trim()) { toast('Add a name'); return; }
+        const num = (key) => (F[key].value === '' ? (key === 'kcal' ? null : 0) : +String(F[key].value).replace(',', '.') || 0);
+        Object.assign(f, { name: name.value.trim(), serving: serving.value.trim() || '1 serving', kcal: num('kcal'), p: num('p'), c: num('c'), f: num('f'), fb: num('fb'), edited: true });
+        if (isNew) { f.id = 'mf' + Date.now().toString(36); f.key = mfKey(f); f.uses = 0; f.lastUsed = Date.now(); f.created = Date.now(); MF().push(f); }
+        await saveSettings(); s.close(); toast('Saved', { icon: 'check' }); myFoodsSheet(k);
+      } }, 'Save')].filter(Boolean),
+  });
+}
+
+// ───────────────────────── Analyze: on-device score vs your own targets (no network, no medical claims)
+export const WEIGHTS = { kcal: 30, p: 30, timing: 20, f: 10, fb: 10 };
+const clamp = (v) => Math.max(0, Math.min(100, v));
+const EVENING = new Set(['dinner', 'late']);
+export function scoreDay(k) {
+  const tot = nTotals(k), d = nDay(k), n = T();
+  if (!tot.n) return null;
+  const c = {}, train = isTrainingDay(k), kt = kcalTarget(k);
+  const hasKcal = tot.kcal > 0;
+  if (hasKcal) { const ad = Math.abs(tot.kcal - kt) / kt; c.kcal = { score: ad <= 0.07 ? 100 : clamp(100 * (1 - (ad - 0.07) / 0.28)), v: tot.kcal, target: kt, train }; }
+  const p = tot.p;
+  c.p = { score: p >= n.protein ? 100 : p >= n.proteinFloor ? 75 + 25 * (p - n.proteinFloor) / (n.protein - n.proteinFloor) : clamp(70 * (p - 60) / (n.proteinFloor - 60)), v: p };
+  if (hasKcal) { c.f = { score: clamp((tot.f / n.fatMin) * 100), v: tot.f }; c.fb = { score: clamp((tot.fb / n.fiber) * 100), v: tot.fb }; }
+  // timing: protein spread across windows + how back-loaded the day was
+  const known = d.entries.filter((e) => winOf(e) !== 'unspecified');
+  const knownShare = d.entries.length ? known.length / d.entries.length : 0;
+  if (known.length && knownShare >= 0.5) {
+    const byW = {}; for (const e of known) { const w = winOf(e); byW[w] ||= { p: 0, kcal: 0 }; byW[w].p += +e.p || 0; byW[w].kcal += +e.kcal || 0; }
+    const pWins = Object.values(byW).filter((x) => x.p >= 20).length;
+    const totK = Object.values(byW).reduce((a, x) => a + x.kcal, 0), totP = Object.values(byW).reduce((a, x) => a + x.p, 0);
+    const eve = Object.entries(byW).filter(([w]) => EVENING.has(w)).reduce((a, [, x]) => a + (totK > 0 ? x.kcal : x.p), 0) / (totK > 0 ? totK : totP || 1);
+    const spread = pWins >= 3 ? 100 : pWins === 2 ? 75 : pWins === 1 ? 40 : 20;
+    const late = eve <= 0.5 ? 100 : clamp(100 * (1 - (eve - 0.5) / 0.4));
+    c.timing = { score: 0.6 * spread + 0.4 * late, pWins, eve, windows: Object.keys(byW).length };
+  }
+  return { k, c, total: weighted(c), items: tot.n, missingKcal: tot.missingKcal, hasKcal, unspecified: d.entries.length - known.length };
+}
+function weighted(c) { let sw = 0, sv = 0; for (const [key, x] of Object.entries(c)) { sw += WEIGHTS[key]; sv += WEIGHTS[key] * x.score; } return sw ? Math.round(sv / sw) : null; }
+export function analyze(mode, end = today()) {
+  const days = mode === 'week' ? Array.from({ length: 7 }, (_, i) => shiftDay(end, -i)) : [end];
+  const res = days.map(scoreDay).filter(Boolean);
+  const comps = {};
+  for (const key of Object.keys(WEIGHTS)) {
+    const xs = res.filter((r) => r.c[key]);
+    if (!xs.length) continue;
+    const avg = (f) => xs.reduce((a, r) => a + f(r.c[key]), 0) / xs.length;
+    comps[key] = { score: avg((x) => x.score), days: xs.length, v: key === 'timing' ? null : avg((x) => x.v), target: key === 'kcal' ? avg((x) => x.target) : null,
+      over: key === 'kcal' ? avg((x) => x.v - x.target) : null, overDays: key === 'kcal' ? xs.filter((r) => r.c.kcal.v > r.c.kcal.target * 1.07).length : null, underDays: key === 'kcal' ? xs.filter((r) => r.c.kcal.v < r.c.kcal.target * 0.93).length : null, eve: key === 'timing' ? avg((x) => x.eve) : null, pWins: key === 'timing' ? avg((x) => x.pWins) : null };
+  }
+  const n = T(), logged = res.length, kDays = res.filter((r) => r.hasKcal).length;
+  const conf = mode === 'week' ? (logged >= 5 && kDays >= 4 ? 'good' : logged >= 3 ? 'medium' : 'low') : (res[0] && res[0].items >= 2 && res[0].hasKcal ? 'good' : 'low');
+  const floorDays = res.filter((r) => r.c.p.v >= n.proteinFloor).length;
+  return { mode, end, days: days.length, logged, kDays, comps, total: weighted(comps), conf, floorDays, unspecified: res.reduce((a, r) => a + r.unspecified, 0), tips: tipsFor(comps, { mode, logged, kDays, res }) };
+}
+function tipsFor(c, { mode, logged, kDays, res }) {
+  const n = T(), tips = [], per = mode === 'week' ? ' a day on average' : '';
+  const ranked = Object.entries(c).filter(([, x]) => x.score < 85); // biggest weighted shortfall first
+  ranked.sort((a, b) => (100 - b[1].score) * WEIGHTS[b[0]] - (100 - a[1].score) * WEIGHTS[a[0]]);
+  for (const [key, x] of ranked) {
+    if (tips.length >= 3) break;
+    if (key === 'p') tips.push(x.v < n.proteinFloor ? `Protein was ${r0(x.v)} g${per} — ${r0(n.proteinFloor - x.v)} g under your ${n.proteinFloor} g floor. The easy fix is one protein item before dinner (a Fairlife or a bar mid-morning or midday), so dinner isn’t doing all the work.`
+      : `Protein was ${r0(x.v)} g${per}: above the floor, ${r0(n.protein - x.v)} g short of ${n.protein} g. One more protein item early in the day closes it.`);
+    else if (key === 'kcal' && x.overDays && x.underDays) tips.push(`Calories swung: ${x.underDays} day${x.underDays > 1 ? 's' : ''} well under target and ${x.overDays} well over. That’s the skip-all-day, big-dinner pattern. A steady midday meal makes dinner smaller without trying.`);
+    else if (key === 'kcal') tips.push(x.over > 0 ? `Calories ran about ${r0(x.over)} over target${per}. Dinner is the easiest place to cut: a smaller portion of the big plate, or sauce/oil on the side, usually covers it.`
+      : `Calories ran about ${r0(-x.over)} under target${per}. On a recomp, eating far under (especially on gym days) can stall strength. Add a real midday meal instead of skipping.`);
+    else if (key === 'timing') tips.push(`About ${r0((x.eve || 0) * 100)}% of the day’s intake came at dinner or later, and protein landed in ${r1(x.pWins)} window${x.pWins === 1 ? '' : 's'} with 20 g+. Try 20–40 g in 2–3 windows: morning shake, midday bar or lunch, then dinner.`);
+    else if (key === 'f') tips.push(`Fat was ${r0(x.v)} g${per} vs your ${n.fatMin} g minimum. Eggs, nuts, olive oil, avocado or salmon add it without much volume.`);
+    else if (key === 'fb') tips.push(`Fiber was ${r0(x.v)} g${per} vs ~${n.fiber} g. Fruit, beans, oats or a side of vegetables at lunch helps, and keeps the sweet tooth calmer.`);
+  }
+  if (!c.timing && logged) tips.push('Set a time window on what you log (Morning … Late). Without windows the meal-timing part can’t be scored.');
+  if (mode === 'week' && logged < 4) tips.push(`Only ${logged} of 7 days are logged, so treat this score as a rough read. Unlogged days aren’t counted as zero, but they also aren’t evidence.`);
+  else if (mode === 'week' && kDays < logged) tips.push(`${logged - kDays} logged day${logged - kDays > 1 ? 's have' : ' has'} protein but no calories. Add calories there for a fuller score.`);
+  if (!tips.length) tips.push('Every part is in good shape. Keep the same pattern, and check it against the weigh-in trend in 2–3 weeks.');
+  return tips.slice(0, 3);
+}
+const COMP_LABEL = { kcal: 'Calories vs target', p: 'Protein', timing: 'Meal timing', f: 'Fat minimum', fb: 'Fiber' };
+const scoreColor = (v) => (v >= 80 ? '#30D158' : v >= 60 ? '#FFD60A' : '#FF9F0A');
+function compDetail(key, x, mode) {
+  const n = T(), per = mode === 'week' ? ' avg' : '';
+  if (key === 'kcal') return `${r0(x.v)}${per} vs ${r0(x.target)} kcal · full marks within ±7%, zero at ±35%`;
+  if (key === 'p') return `${r0(x.v)} g${per} · ${n.protein} g = 100, ${n.proteinFloor} g floor = 75`;
+  if (key === 'f') return `${r0(x.v)} g${per} of ${n.fatMin} g min`;
+  if (key === 'fb') return `${r0(x.v)} g${per} of ${n.fiber} g`;
+  if (key === 'timing') return `${r1(x.pWins)} window${x.pWins === 1 ? '' : 's'} with 20 g+ protein (60%) · ${r0(x.eve * 100)}% at dinner/late, full marks ≤50% (40%)`;
+  return '';
+}
+function analyzeCard(k) {
+  const a = analyze('day', k), w = analyze('week', k);
+  return h('button', { class: 'card notice press analyze-card', onclick: () => analyzeSheet(k) }, icon('chart', 22),
+    h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Analyze'),
+      h('div', { class: 'muted small' }, `${dayLabel(k)}: ${a.total ?? '—'} · Last 7 days: ${w.total ?? '—'}${w.logged ? ` (${w.logged}/7 logged)` : ''}`)), icon('chevron', 18));
+}
+export function analyzeSheet(k = today(), mode = 'day') {
+  const body = h('div', { class: 'stack' });
+  const draw = () => {
+    const a = analyze(mode, k);
+    const confTxt = { good: 'Good data', medium: 'Some days missing', low: 'Low confidence' }[a.conf];
+    if (!a.logged) { body.replaceChildren(segBar(), h('div', { class: 'card empty' }, h('div', { class: 'title-s' }, 'Nothing logged'), h('div', { class: 'muted small' }, mode === 'week' ? 'No food logged in the last 7 days.' : 'Log something for this day first.'))); return; }
+    body.replaceChildren(segBar(),
+      h('div', { class: 'score-hero' }, ring(a.total / 100, { size: 128, stroke: 13, colors: [scoreColor(a.total), scoreColor(a.total)], children: [h('div', { class: 'ring-num' }, String(a.total)), h('div', { class: 'ring-sub' }, 'of 100')] }),
+        h('div', { class: 'grow' }, h('div', { class: 'title-s' }, mode === 'week' ? `Last 7 days · to ${dayLabel(k)}` : dayLabel(k)),
+          h('div', { class: 'muted small' }, mode === 'week' ? `${a.logged} of 7 days logged · ${a.kDays} with calories` : `${nTotals(k).n} items logged`),
+          h('span', { class: 'pill tiny ' + (a.conf === 'good' ? 'train' : 'warn soft') }, confTxt),
+          mode === 'week' ? h('div', { class: 'muted tiny' }, `Protein floor hit ${a.floorDays}/${a.logged} days`) : null)),
+      h('div', { class: 'eyebrow' }, 'Breakdown'),
+      h('div', { class: 'list' }, Object.keys(WEIGHTS).map((key) => {
+        const x = a.comps[key];
+        return h('div', { class: 'comp' + (x ? '' : ' off') }, h('div', { class: 'row-between' }, h('span', { class: 'small' }, COMP_LABEL[key], h('span', { class: 'muted tiny' }, ` · weight ${WEIGHTS[key]}%`)),
+          h('b', { class: 'mono', style: { color: x ? scoreColor(x.score) : '' } }, x ? r0(x.score) : 'n/a')),
+          x ? h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: { width: x.score + '%', background: scoreColor(x.score) } })) : null,
+          h('div', { class: 'muted tiny' }, x ? compDetail(key, x, mode) : key === 'timing' ? 'Not scored: set time windows on entries' : 'Not scored: no calorie/food data'));
+      })),
+      h('div', { class: 'muted tiny' }, 'Parts that can’t be scored are left out and the rest re-weighted. Week = average of logged days only; unlogged days are skipped, not counted as zero. Gym day = a completed workout that date (or your override).'),
+      h('div', { class: 'eyebrow' }, 'What to improve'),
+      h('div', { class: 'list' }, a.tips.map((t, i) => h('div', { class: 'tip' }, h('span', { class: 'tip-n' }, String(i + 1)), h('div', { class: 'small' }, t)))),
+      mode === 'week' ? trendBlock(a) : null,
+      h('div', { class: 'muted tiny' }, 'A habit score against your own targets, worked out on this phone. Not medical or dietary advice.'));
+  };
+  const segBar = () => segmented([{ label: 'Day', value: 'day' }, { label: 'Week', value: 'week' }], mode, (v) => { mode = v; draw(); });
+  draw();
+  sheet(body, { title: 'Analyze', tall: true });
+  function trendBlock(a) {
+    const n = T(); n.scores ||= [];
+    const wk = E.dayKey(E.weekStart(new Date(k + 'T12:00')));
+    const saved = n.scores.find((x) => x.week === wk);
+    const list = [...n.scores].sort((x, y) => x.week.localeCompare(y.week)).slice(-10);
+    return h('div', { class: 'stack-s' }, h('div', { class: 'row-between' }, h('div', { class: 'eyebrow' }, 'Weekly trend'),
+      h('button', { class: 'btn small ghost', onclick: async () => {
+        const rec = { week: wk, end: k, score: a.total, logged: a.logged, conf: a.conf, at: Date.now(), parts: Object.fromEntries(Object.entries(a.comps).map(([key, x]) => [key, r0(x.score)])) };
+        n.scores = [...n.scores.filter((x) => x.week !== wk), rec]; await saveSettings(); haptic('success'); toast(saved ? 'Week score updated' : 'Week score saved', { icon: 'check' }); draw();
+      } }, saved ? 'Update this week' : 'Save this week')),
+      list.length ? barChart(list.map((x) => ({ y: x.score, label: x.week.slice(5), hl: x.week === wk })), { target: 80, color: '#30D158', color2: '#B4FF5A', height: 90 }) : h('div', { class: 'muted tiny' }, 'Save a score each week (e.g. Sunday) to see the trend here.'),
+      list.length ? h('div', { class: 'muted tiny' }, list.map((x) => `wk of ${x.week.slice(5)}: ${x.score}${x.conf === 'low' ? ' (low data)' : ''}`).join(' · ')) : null);
+  }
+}
+export const _test = { offSearch, offBarcode, searchLocal, analyze, scoreDay, rememberFood };

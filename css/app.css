@@ -408,7 +408,7 @@ body.sheet-open #view { overflow: hidden; }
 .quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .qbtn { background: rgba(255,255,255,.07); border-radius: 14px; padding: 12px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; }
 .qbtn b { color: var(--green); }
-.action-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.action-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .abtn { background: rgba(255,255,255,.07); border-radius: 14px; padding: 10px 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-align: center; }
 .abtn .ic { color: var(--orange); }
 .stack-s { display: flex; flex-direction: column; gap: 8px; }
@@ -453,3 +453,17 @@ body.sheet-open #view { overflow: hidden; }
 .log-title > div { min-width: 0; overflow: hidden; }
 .log-title .title-s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .log-head-row > .btn, .log-head-l { flex: none; }
+/* v1.3 nutrition upgrades */
+.seg.win5 .seg-btn { font-size: 12px; padding: 0 2px; letter-spacing: -.01em; }
+.mf-wrap { display: flex; align-items: center; gap: 4px; }
+.mf-wrap .mf-row { flex: 1; }
+.mf-row { padding: 6px 8px 6px 10px; }
+.mf-main { text-align: left; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mf-edit { flex: none; }
+.analyze-card .ic { color: var(--green) !important; }
+.score-hero { display: flex; align-items: center; gap: 16px; }
+.score-hero .grow { display: flex; flex-direction: column; gap: 4px; }
+.comp { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.04); }
+.comp.off { opacity: .55; }
+.tip { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.04); }
+.tip-n { flex: none; width: 22px; height: 22px; border-radius: 50%; background: rgba(48,209,88,.18); color: var(--green); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }

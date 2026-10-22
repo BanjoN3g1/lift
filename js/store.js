@@ -7,7 +7,7 @@ export const DEFAULTS = {
   unit: 'lb', waistUnit: 'in', bodyweight: 145, bodyweightUnit: 'lb', proteinTarget: 145,
   barLb: 45, barKg: 20, restCompound: 150, restSmall: 75, restSuperset: 90,
   deloadEvery: 7, deload: { active: false, remaining: 0, lastEnd: null },
-  nutrition: { kcalTrain: 2200, kcalRest: 1900, protein: 140, proteinFloor: 120, fatMin: 55, fiber: 30, favorites: [] },
+  nutrition: { kcalTrain: 2200, kcalRest: 1900, protein: 140, proteinFloor: 120, fatMin: 55, fiber: 30, favorites: [], myFoods: [], scores: [] },
   favorites: [], swaps: {}, notes: {}, unitByEx: {}, rotOverride: null, lastBackup: null, name: 'Sal', sound: true,
 };
 
@@ -63,7 +63,12 @@ async function migrateProtein() {
   S.settings.nutritionMigrated = true;
   await saveSettings();
 }
-export function mealFor(d = new Date()) { const hr = d.getHours() + d.getMinutes() / 60; return hr < 10.5 ? 'breakfast' : hr < 15 ? 'lunch' : hr < 17.5 ? 'snack' : 'dinner'; }
+// Meal time windows (v1.3). Legacy entries (breakfast/lunch/snack) map onto them; entries with no window show as Unspecified.
+export const WINDOWS = [{ value: 'morning', label: 'Morning', range: 'before 10:30' }, { value: 'midday', label: 'Midday', range: '10:30–2:30' },
+  { value: 'afternoon', label: 'Afternoon', range: '2:30–5' }, { value: 'dinner', label: 'Dinner', range: '5–9' }, { value: 'late', label: 'Late', range: 'after 9' }];
+const LEGACY_WIN = { breakfast: 'morning', lunch: 'midday', dinner: 'dinner' }; // old 'snack' was also the past-day default, so it's ambiguous → Unspecified
+export function winOf(e) { const m = e?.meal; return WINDOWS.some((w) => w.value === m) ? m : LEGACY_WIN[m] || 'unspecified'; }
+export function mealFor(d = new Date()) { const hr = d.getHours() + d.getMinutes() / 60; return hr < 4 ? 'late' : hr < 10.5 ? 'morning' : hr < 14.5 ? 'midday' : hr < 17 ? 'afternoon' : hr < 21 ? 'dinner' : 'late'; }
 export function nDay(k = today()) { return S.nutrition[k] || { id: k, entries: [], training: null }; }
 export async function putNDay(day) { S.nutrition[day.id] = day; await db.put('nutrition', JSON.parse(JSON.stringify(day))); }
 export const LOW_STEPS = 5000;
