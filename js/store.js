@@ -2,6 +2,7 @@
 import { db } from './db.js';
 import * as E from './engine.js';
 import { ROTATION } from './data.js';
+import { loadLock } from './photolock.js';
 
 export const DEFAULTS = {
   unit: 'lb', waistUnit: 'in', bodyweight: 145, bodyweightUnit: 'lb', proteinTarget: 145,
@@ -23,6 +24,7 @@ export async function load() {
   S.nutrition = Object.fromEntries((await db.all('nutrition')).map((p) => [p.id, p]));
   await migrateProtein();
   S.photos = (await db.all('photos')).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  await loadLock();
   S.active = S.sessions.find((s) => s.status === 'active') || null;
   derive();
 }
@@ -140,22 +142,25 @@ export async function undoProtein() { const p = proteinDay(); const x = p.entrie
 export const proteinTotal = (k = today()) => nTotals(k).p;
 
 // Backup
-export async function exportData(includePhotos) {
+// Default backup never contains photos (v1.4). Photos have their own explicit export in the Photos section.
+export async function exportData() {
   const photos = [];
-  if (includePhotos) for (const p of S.photos) photos.push({ ...p, blob: undefined, dataUrl: await blobToDataURL(p.blob) });
   return { app: 'lift', format: 1, exportedAt: new Date().toISOString(), settings: S.settings, sessions: S.sessions.filter((s) => s.status !== 'active'),
     body: S.body, protein: Object.values(S.protein), nutrition: Object.values(S.nutrition), photos };
 }
 export async function importData(obj) {
   if (!obj || obj.app !== 'lift') throw new Error('Not a Lift backup file');
-  for (const s of db.stores) await db.clear(s);
+  // Photos and the photo-lock config are left alone: a data backup never wipes on-device photos.
+  for (const s of ['sessions', 'body', 'protein', 'nutrition']) await db.clear(s);
   await db.put('kv', { k: 'settings', v: { ...DEFAULTS, ...obj.settings } });
   await db.putMany('sessions', obj.sessions || []);
   await db.putMany('body', obj.body || []);
   await db.putMany('protein', obj.protein || []);
   await db.putMany('nutrition', obj.nutrition || []);
-  for (const p of obj.photos || []) { const { dataUrl, ...rest } = p; if (dataUrl) await db.put('photos', { ...rest, blob: await (await fetch(dataUrl)).blob() }); }
+  const have = new Set((await db.all('photos')).map((p) => p.id)); // older backups may carry photos: merge, never replace
+  for (const p of obj.photos || []) { const { dataUrl, ...rest } = p; if (dataUrl && !have.has(p.id)) await db.put('photos', { ...rest, enc: undefined, blob: dataURLToBlob(dataUrl) }); }
   await load();
 }
 export async function eraseAll() { for (const s of db.stores) await db.clear(s); await load(); }
-function blobToDataURL(b) { return new Promise((res) => { if (!b) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); }); }
+export function dataURLToBlob(u) { const [h, d] = u.split(','); const bin = atob(d); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new Blob([a], { type: (h.match(/data:([^;]+)/) || [])[1] || 'image/jpeg' }); }
+export function blobToDataURL(b) { return new Promise((res) => { if (!b) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); }); }

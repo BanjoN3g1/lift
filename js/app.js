@@ -221,7 +221,7 @@ export function openSettings() {
       Object.keys(st.swaps || {}).length ? h('button', { class: 'btn ghost', onclick: async () => { st.swaps = {}; await saveSettings(); toast('Saved swaps cleared'); } }, `Reset ${Object.keys(st.swaps).length} saved exercise swap(s)`) : null),
     h('div', { class: 'group-title' }, 'Your data'),
     h('div', { class: 'group' },
-      h('div', { class: 'note muted small' }, icon('lock', 13), ' Workouts, body stats and photos are stored only on this phone (IndexedDB). Nothing is uploaded. Deleting the app or clearing Safari data erases it — keep a backup.'),
+      h('div', { class: 'note muted small' }, icon('lock', 13), ' Workouts, body stats and photos are stored only on this phone (IndexedDB). Nothing is uploaded automatically. Deleting the app or clearing Safari data erases it — keep a backup.'),
       h('button', { class: 'btn ghost', onclick: () => backupSheet() }, icon('download', 16), ' Back up / restore'),
       h('button', { class: 'btn ghost', onclick: () => maybeOnboard(true) }, 'Show the intro again'),
       h('div', { class: 'form-row' }, h('span', null, 'Last backup'), h('span', { class: 'muted' }, st.lastBackup ? new Date(st.lastBackup).toLocaleDateString() : 'Never')),
@@ -231,13 +231,12 @@ export function openSettings() {
 }
 
 export function backupSheet() {
-  let withPhotos = true;
   const s = sheet(h('div', { class: 'settings' },
     h('p', { class: 'muted small pad' }, 'A backup is a single JSON file you keep (Files, iCloud Drive, AirDrop to your laptop). Restore it here on any phone.'),
     h('div', { class: 'group' },
-      h('div', { class: 'form-row' }, h('span', null, `Include photos (${S.photos.length})`), toggle(true, (v) => (withPhotos = v))),
+      h('div', { class: 'note muted small' }, icon('lock', 13), ` Photos are never in this backup${S.photos.length ? ` (${S.photos.length} on this phone)` : ''}. To save them, use Body → Photos → Export photos.`),
       h('button', { class: 'btn primary', onclick: async () => {
-        const data = await exportData(withPhotos);
+        const data = await exportData();
         const name = `lift-backup-${E.dayKey()}.json`;
         const file = new File([JSON.stringify(data)], name, { type: 'application/json' });
         let shared = false;
@@ -250,7 +249,7 @@ export function backupSheet() {
         const f = e.target.files[0]; if (!f) return;
         try {
           const obj = JSON.parse(await f.text());
-          if (!(await confirmSheet('Replace all data?', `This backup has ${obj.sessions?.length || 0} workouts and ${obj.photos?.length || 0} photos. It will replace what's on this phone.`, 'Restore', true))) return;
+          if (!(await confirmSheet('Replace all data?', `This backup has ${obj.sessions?.length || 0} workouts. It replaces workouts, body stats, nutrition and settings on this phone. Photos on this phone are kept${obj.photos?.length ? ` (the ${obj.photos.length} photos inside this older backup are added)` : ''}.`, 'Restore', true))) return;
           await importData(obj); s.close(); app.refresh(); toast('Restored', { icon: 'check' });
         } catch (err) { toast('Could not read that file: ' + err.message, { tone: 'bad', ms: 3500 }); }
       } })))), { title: 'Backup & restore' });
