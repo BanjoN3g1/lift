@@ -16,7 +16,7 @@ function winPicker(value, onChange) {
 }
 const SRC = {
   usda: { label: 'USDA FNDDS', cls: 'usda' }, off: { label: 'Open Food Facts · user-contributed', cls: 'off' },
-  quick: { label: 'Quick add', cls: 'quick' }, ai: { label: 'Claude estimate', cls: 'off' }, local: { label: 'USDA match', cls: 'usda' }, fav: { label: 'Favorite', cls: 'fav' }, my: { label: 'My foods', cls: 'fav' }, custom: { label: 'Your entry', cls: 'quick' },
+  quick: { label: 'Quick add', cls: 'quick' }, ai: { label: 'AI estimate', cls: 'off' }, local: { label: 'USDA match', cls: 'usda' }, fav: { label: 'Favorite', cls: 'fav' }, my: { label: 'My foods', cls: 'fav' }, custom: { label: 'Your entry', cls: 'quick' },
 };
 const r0 = (v) => Math.round(+v || 0);
 const r1 = (v) => Math.round((+v || 0) * 10) / 10;
@@ -781,7 +781,7 @@ export function analyzeSheet(k = today(), mode = 'day') {
 export const _test = { offSearch, offBarcode, searchLocal, analyze, scoreDay, rememberFood };
 
 // ───────────────────────── Free-text logging (v1.5): "2 eggs, Fairlife shake, chicken pad thai from Thai restaurant"
-// With a Claude key: grounded estimate (local USDA FNDDS + My foods candidates passed as reference). Without: local USDA match.
+// With a Gemini key: grounded estimate (local USDA FNDDS + My foods candidates passed as reference). Without: local USDA match.
 const QTY_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, half: 0.5, couple: 2 };
 export function splitFoods(text) { return String(text).split(/[,;\n+]|\s&\s/).map((x) => x.trim()).filter(Boolean).slice(0, 12); }
 function qtyOf(seg) {
@@ -832,8 +832,8 @@ Rules:
 export async function estimateText(text) {
   const g = await groundingFor(text);
   if (!(await AI.hasKey())) return localEstimate(g);
-  const r = await AI.ask({ system: FOOD_SYSTEM, schema: FOOD_SCHEMA, maxTokens: 6000,
-    content: [{ type: 'text', text: `FOOD LOG TEXT:\n${text}\n\nREFERENCE (local database lookups; may be imperfect matches):\n${refLines(g)}` }] });
+  const r = await AI.ask({ system: FOOD_SYSTEM, schema: FOOD_SCHEMA, maxTokens: 8192,
+    parts: [AI.textPart(`FOOD LOG TEXT:\n${text}\n\nREFERENCE (local database lookups; may be imperfect matches):\n${refLines(g)}`)] });
   const j = r.json;
   return { source: 'ai', model: r.model, included: j.included || [], not_included: j.not_included || [], notes: j.notes || '',
     items: (j.items || []).map((x) => ({ name: x.name, portion: x.portion, grams: +x.grams || null, kcal: r0(x.kcal), p: r1(x.protein_g), f: r1(x.fat_g), c: r1(x.carbs_g), fb: r1(x.fiber_g), conf: x.confidence, assumptions: x.assumptions, ref: x.reference_used })) };
@@ -856,11 +856,11 @@ function logCard(k) {
     const text = ta.value.trim(); if (!text) { ta.focus(); return; }
     btn.disabled = true; const label = btn.textContent; btn.textContent = 'Estimating…';
     try { const res = await estimateText(text); reviewSheet(k, res, meal, text, () => (ta.value = '')); }
-    catch (e) { toast(e.message, { tone: 'bad', ms: 4500 }); if (e.code === 'nokey' || /key/i.test(e.message)) AI.aiSettingsSheet(); }
+    catch (e) { toast(e.message, { tone: 'bad', ms: e.code === 'rate' ? 8000 : 4500 }); if (e.code === 'nokey' || e.code === 'badkey') AI.aiSettingsSheet(); }
     finally { btn.disabled = false; btn.textContent = label; }
   } }, 'Estimate');
   const hint = h('div', { class: 'muted tiny' });
-  AI.aiStatus().then((st) => { btn.textContent = st.hasKey ? 'Estimate with Claude' : 'Estimate (on-device match)'; hint.replaceChildren(st.hasKey ? 'Sends just this text plus local database matches to Anthropic. You review before anything is saved.' : h('span', null, 'No AI key: matches the built-in USDA list. ', h('button', { class: 'link', onclick: () => AI.aiSettingsSheet() }, 'Add a Claude key'), ' for smarter estimates.')); });
+  AI.aiStatus().then((st) => { btn.textContent = st.hasKey ? 'Estimate with Gemini' : 'Estimate (on-device match)'; hint.replaceChildren(st.hasKey ? 'Sends just this text plus local database matches to Google Gemini (free tier). You review before anything is saved.' : h('span', null, 'No AI key: matches the built-in USDA list. ', h('button', { class: 'link', onclick: () => AI.aiSettingsSheet() }, 'Add a free Gemini key'), ' for smarter estimates.')); });
   return h('section', { class: 'card log-card' }, h('div', { class: 'eyebrow' }, 'Log food'), ta, winPicker(meal, (v) => (meal = v)), btn, hint);
 }
 function reviewSheet(k, res, meal, text, onSaved) {
@@ -884,7 +884,7 @@ function reviewSheet(k, res, meal, text, onSaved) {
     res.notes ? h('div', { class: 'muted tiny' }, res.notes) : null].filter(Boolean);
   const s = sheet(h('div', { class: 'stack' },
     h('div', { class: 'muted small' }, `“${text}”`),
-    h('span', { class: 'src ' + (res.source === 'ai' ? 'off' : 'usda') }, res.source === 'ai' ? `Estimated by Claude (${res.model}) · check portions` : 'On-device USDA match · no AI'),
+    h('span', { class: 'src ' + (res.source === 'ai' ? 'off' : 'usda') }, res.source === 'ai' ? `Estimated by Gemini (${res.model}) · check portions` : 'On-device USDA match · no AI'),
     totalsEl, list, notes.length ? h('div', { class: 'card rv-notes' }, notes) : null, winPicker(meal, (v) => (meal = v)),
     h('div', { class: 'muted tiny' }, 'Edit anything before saving. Each item also goes to My foods so it’s one tap next time.')), {
     title: 'Review estimate', tall: true,

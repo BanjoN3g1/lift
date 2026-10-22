@@ -533,3 +533,24 @@ body.sheet-open #view { overflow: hidden; }
 .settings .pad, .stack-s.pad { padding: 8px 0; }
 .row.rv-scale { width: auto; flex: none; padding: 0; background: none; gap: 4px; }
 .rv-item .row-between .input { min-width: 0; }
+/* v1.6 face anonymization review + editor */
+.anon-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.anon-tile { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.anon-thumb { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; border-radius: 12px; overflow: hidden; background: rgba(255,255,255,.06); }
+.anon-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.anon-tile.loading .anon-thumb { animation: anon-pulse 1.2s ease-in-out infinite alternate; }
+.anon-tile.excluded .anon-thumb img { opacity: .3; filter: grayscale(1); }
+.anon-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font-size: 11px; }
+.anon-meta .pill { font-size: 10px; padding: 2px 6px; white-space: normal; line-height: 1.25; }
+.anon-face, .anon-manual { background: rgba(48,209,88,.16); color: var(--green); }
+.anon-fallback { background: rgba(255,214,10,.16); color: var(--yellow); }
+.anon-none { background: rgba(255,69,58,.18); color: var(--red, #ff453a); }
+.anon-stage { position: relative; width: 100%; max-width: 420px; margin: 8px auto 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+.anon-img { display: block; width: 100%; height: auto; border-radius: 14px; pointer-events: none; -webkit-touch-callout: none; }
+.anon-box { position: absolute; background: rgba(28,28,30,.9); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); border: 2px dashed rgba(255,255,255,.85); border-radius: 6px; touch-action: none; cursor: move; }
+.anon-handle { position: absolute; right: -12px; bottom: -12px; width: 28px; height: 28px; border-radius: 50%; background: var(--blue); border: 3px solid #fff; cursor: nwse-resize; touch-action: none; }
+.anon-del { position: absolute; right: -10px; top: -10px; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,.75); color: #fff; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.5); }
+.ai-free-note { line-height: 1.4; }
+.warn-soft { background: rgba(255,214,10,.10); border: 1px solid rgba(255,214,10,.25); }
+@keyframes anon-pulse { from { opacity: .5; } to { opacity: 1; } }
+.row.wrap { flex-wrap: wrap; }

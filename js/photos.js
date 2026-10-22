@@ -1,5 +1,5 @@
 // Progress photos (v1.4). Stored only in IndexedDB on this phone: downscaled, re-encoded (no EXIF/GPS), optionally encrypted.
-// No network calls ever involve photos. The only ways a photo leaves the phone are the explicit Share and Export actions.
+// Photos leave the phone only via Analyze (Gemini), Share and Export. Analyze and Share always send face-anonymized copies (anon.js).
 import { h, $, icon, haptic, toast, sheet, segmented, toggle, confirmSheet } from './ui.js';
 import { S, U, blobToDataURL, dataURLToBlob } from './store.js';
 import { db } from './db.js';
@@ -7,6 +7,7 @@ import * as E from './engine.js';
 import * as L from './photolock.js';
 import { app } from './app.js';
 import * as AI from './ai.js';
+import * as A from './anon.js';
 import { EX, WORKOUTS, ROTATION } from './data.js';
 import { analyze as analyzeNutrition } from './nutrition.js';
 
@@ -123,7 +124,7 @@ export function photos(body) {
   const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, style: 'display:none', onchange: async (e) => { hold(false); const files = [...e.target.files]; fileIn.value = ''; if (files.length) await importFiles(files); } });
   body.append(fileIn);
   if (selecting) {
-    body.append(h('section', { class: 'card sel-bar' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, `${sel.size} selected`), h('div', { class: 'muted tiny' }, 'Opens the iOS share sheet. Shirtless only.')),
+    body.append(h('section', { class: 'card sel-bar' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, `${sel.size} selected`), h('div', { class: 'muted tiny' }, 'Faces are hidden first, then the iOS share sheet opens. Shirtless only.')),
       h('button', { class: 'btn small ghost', onclick: () => { selecting = false; sel.clear(); app.refresh(); } }, 'Cancel'),
       h('button', { class: 'btn small primary', disabled: !sel.size, onclick: () => shareSelected() }, 'Share')));
   } else {
@@ -158,18 +159,18 @@ export function photos(body) {
   const store = h('span'); storageLine().then((t) => (store.textContent = t));
   body.append(h('button', { class: 'card notice press lock-row', onclick: () => lockSheet() }, icon('lock', 20),
     h('div', { class: 'grow' }, h('div', { class: 'title-s' }, info.on ? (info.encrypt ? 'Locked & encrypted' : 'Locked (privacy screen)') : 'Photo lock: off'),
-      h('div', { class: 'muted tiny' }, 'Only on this phone. Photos leave it only when you tap Analyze (to Anthropic) or Share/Export. ', store)), icon('chevron', 18)));
+      h('div', { class: 'muted tiny' }, 'Only on this phone. Photos leave it only when you tap Analyze (to Google Gemini) or Share/Export. Analyze and Share hide your face first. ', store)), icon('chevron', 18)));
 }
 function moreSheet() {
   const s = sheet(h('div', { class: 'settings' }, h('div', { class: 'group' },
     h('button', { class: 'btn ghost', disabled: !S.photos.length, onclick: () => { s.close(); selecting = true; sel.clear(); app.refresh(); } }, icon('upload', 16), ' Share photos via iOS share sheet'),
     h('button', { class: 'btn ghost', disabled: !S.photos.length, onclick: () => { s.close(); exportPhotos(); } }, icon('download', 16), ' Export photos (unencrypted file)'),
     h('label', { class: 'btn ghost file-btn' }, icon('upload', 16), ' Import a photo export…', h('input', { type: 'file', accept: 'application/json,.json', onclick: () => hold(true), onchange: async (e) => { hold(false); const f = e.target.files[0]; e.target.value = ''; s.close(); if (f) await importPhotoExport(f); } })),
-    h('button', { class: 'btn ghost', onclick: () => { s.close(); AI.aiSettingsSheet(); } }, icon('bolt', 16), ' AI (Claude) settings')),
+    h('button', { class: 'btn ghost', onclick: () => { s.close(); AI.aiSettingsSheet(); } }, icon('bolt', 16), ' AI (Gemini) settings')),
     h('div', { class: 'note muted small' }, 'Photos are not part of the regular Back up file.')), { title: 'Photos' });
 }
 
-// ───────────────────────── AI progress analysis (v1.5): auto-picks a timeline set, sends it to Claude, saves the report on-device
+// ───────────────────────── AI progress analysis (v1.5, Gemini since v1.6): auto-picks a timeline set, anonymizes faces on-device, sends it, saves the report on-device
 const CAP = 14, AI_EDGE = 1024;
 export function pickSet(list = S.photos) {
   const ps = [...list].sort((a, b) => (a.ts || 0) - (b.ts || 0));
@@ -196,14 +197,7 @@ export function pickSet(list = S.photos) {
   }
   return [...chosen.values()].sort((a, b) => (a.p.ts || 0) - (b.p.ts || 0));
 }
-async function toAIImage(p) {
-  const src = await createImageBitmap(await blobOf(p));
-  const sc = Math.min(1, AI_EDGE / Math.max(src.width, src.height));
-  const c = h('canvas', { width: Math.round(src.width * sc), height: Math.round(src.height * sc) });
-  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); src.close?.();
-  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
-  return (await blobToDataURL(blob)).split(',')[1];
-}
+async function toB64(blob) { return (await blobToDataURL(blob)).split(',')[1]; }
 function photoLine(p, i) {
   const bw = nearestWeight(p.date);
   return `Photo ${i + 1}: date ${p.date} · pose ${lab(POSES, p.pose) || p.pose}${p.ref ? ' · REFERENCE (a past photo Sal considers good shape)' : ''} · time of day ${p.ts ? fmtTime(p.ts) : 'unknown'}${p.tsSrc === 'upload' ? ' (time added, not taken: treat as unknown)' : ''} · lighting ${lab(LIGHTS, p.light) || 'not tagged'} · ${lab(FED, p.fed) || 'food state not tagged'} · post-workout pump: ${p.post == null ? 'not tagged' : p.post ? 'yes' : 'no'}${bw ? ` · nearest logged bodyweight ${bw}` : ' · no bodyweight logged near this date'}${p.note ? ` · note: ${p.note}` : ''}`;
@@ -228,47 +222,66 @@ Hard rules:
 - Comment only on physique: muscle development, proportions, leanness, symmetry. Ignore anything else in the photos.
 - Body fat: give a visual RANGE (e.g. "about 14–17%"), a confidence level (low/medium/high) and why. Never a single precise number.
 - Account for conditions on every comparison: lighting (bathroom/overhead light exaggerates or hides definition), time of day, post-workout pump, fasted vs after eating, pose and camera distance. Call out when a difference is probably conditions, not real change.
+- Faces are deliberately blurred or covered for privacy. Do not try to identify the person, guess who it is, or comment on the face, head, hair or the covered areas.
 - Suggestions are options Sal can choose to adopt. Never say his plan has been changed. Phrase them as "Consider…" with the reason, tied to his priorities and his current rotation.
 Output Markdown with these sections (## headings): Summary (3 bullets) · Changes over time (better / worse / unclear, with photo numbers) · Now vs your reference photos · Body fat estimate · Strongest and lagging areas · How conditions affect these comparisons · Suggested focus (options to consider) · Tips for the next photo set. About 600–1000 words.`;
+// Opens the manual blur editor for one prepared item and remembers the box on the photo record (coords only, original untouched).
+async function adjustItem(it, opts) {
+  const url = await urlOf(it.p);
+  const plan = await A.editBoxes(it, { originalURL: url });
+  if (!plan) return false;
+  await A.rerender(it, plan, opts);
+  await updateMeta(it.p, { faceBox: { boxes: plan.boxes, at: Date.now() } });
+  return true;
+}
 async function analyzeFlow() {
   if (!(await AI.hasKey())) {
-    const s = sheet(h('div', { class: 'stack' }, AI.setupPrompt('Progress analysis uses your own Claude API key. Paste it once in Settings → AI (Claude).'),
+    const s = sheet(h('div', { class: 'stack' }, AI.setupPrompt('Progress analysis uses your own free Gemini API key. Paste it once in Settings → AI (Gemini).'),
       h('div', { class: 'muted small' }, 'Until then you can still compare photos side by side, or share a set manually from More.')), { title: 'Analyze my progress' });
     return;
   }
-  let set = pickSet();
-  const off = new Set();
-  const grid = h('div', { class: 'photo-grid small-grid' });
-  const btn = h('button', { class: 'btn primary', onclick: () => run() });
+  const set = pickSet();
+  const off = new Set(); const items = new Map(); const opts = { edge: AI_EDGE, quality: 0.8 };
+  const grid = h('div', { class: 'anon-grid' });
+  const btn = h('button', { class: 'btn primary', disabled: true, onclick: () => run() }, 'Hiding faces…');
+  const ready = () => items.size === set.length;
   const draw = () => {
-    grid.replaceChildren(...set.map(({ p, why }) => h('button', { class: 'photo press' + (p.ref ? ' ref' : '') + (off.has(p.id) ? ' excluded' : ''), onclick: () => { off.has(p.id) ? off.delete(p.id) : off.add(p.id); draw(); } },
-      pimg(p), h('span', { class: 'photo-tag' }, `${p.date.slice(2)} ${lab(POSES, p.pose) || p.pose}`), p.ref ? h('span', { class: 'ref-badge' }, '★') : null, off.has(p.id) ? h('span', { class: 'pick-dot' }, icon('close', 12)) : null)));
-    const n = set.length - off.size; btn.textContent = `Send ${n} photo${n === 1 ? '' : 's'} to Claude`; btn.disabled = !n;
+    grid.replaceChildren(...set.map(({ p }) => {
+      const it = items.get(p.id); const cap = `${p.date.slice(2)} ${lab(POSES, p.pose) || p.pose}${p.ref ? ' ★' : ''}`;
+      if (!it) return h('div', { class: 'anon-tile loading' }, h('div', { class: 'anon-thumb' }, h('span', { class: 'photo-tag' }, cap)), h('div', { class: 'anon-meta muted tiny' }, 'Hiding face…'));
+      return A.previewTile(it, { caption: cap, excluded: off.has(p.id), onToggle: () => { off.has(p.id) ? off.delete(p.id) : off.add(p.id); draw(); },
+        onAdjust: async () => { if (await adjustItem(it, opts)) draw(); } });
+    }));
+    const n = set.length - off.size; btn.textContent = ready() ? `Send ${n} anonymized photo${n === 1 ? '' : 's'} to Gemini` : `Hiding faces… ${items.size}/${set.length}`; btn.disabled = !n || !ready();
   };
   draw();
   const st = await AI.aiStatus();
+  let closed = false;
   const s = track(sheet(h('div', { class: 'stack' },
-    h('div', { class: 'small' }, `Auto-picked ${set.length} of ${S.photos.length}: your newest set, reference photos, and one per pose for each period so the timeline is covered. Tap a photo to leave it out.`),
+    h('div', { class: 'small' }, `Auto-picked ${set.length} of ${S.photos.length}: your newest set, reference photos, and one per pose for each period. These previews are exactly what gets sent: your face is blurred and covered on this phone first. Tap a photo to leave it out, or Adjust to move the blur box.`),
     grid,
-    h('div', { class: 'pill warn soft' }, `These photos (resized to ${AI_EDGE} px, no location data), their tags, and your profile, plan and targets go to Anthropic (${st.model}). Shirtless photos only.`),
-    h('div', { class: 'muted tiny' }, 'Typical cost with Sonnet: a few cents per analysis, billed to your Anthropic account. The report is saved only on this phone.')), { title: 'Analyze my progress', tall: true, actions: [btn] }));
+    h('div', { class: 'pill warn soft' }, `Anonymized copies (${AI_EDGE} px, no location data), their tags, and your profile, plan and targets go to Google Gemini (${st.model}). Shirtless photos only.`),
+    h('div', { class: 'muted tiny' }, 'Free tier: no cost, but Google may use what you send to improve its products and human reviewers may see it. The report is saved only on this phone. Your stored photos are not changed.')), { title: 'Analyze my progress', tall: true, actions: [btn], onClose: () => { closed = true; A.release([...items.values()]); } }));
+  try {
+    await A.prepare(set.map((x) => x.p), blobOf, { ...opts, onEach: (i, it) => { if (closed) return; items.set(it.p.id, it); draw(); } });
+  } catch (e) { toast('Couldn’t prepare photos: ' + e.message, { tone: 'bad', ms: 4500 }); }
   async function run() {
     const use = set.filter(({ p }) => !off.has(p.id)).map((x) => x.p);
     const encKey = L.currentKey(), mustEnc = !!L.lockInfo().encrypt;
-    btn.disabled = true; btn.textContent = 'Preparing photos…';
+    btn.disabled = true; btn.textContent = 'Preparing…';
     try {
-      const content = [{ type: 'text', text: contextText() + `
+      const parts = [AI.textPart(contextText() + `
 
-PHOTOS (${use.length}, oldest first). Each photo is preceded by its tags.` }];
-      for (const [i, p] of use.entries()) { content.push({ type: 'text', text: photoLine(p, i) }); content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await toAIImage(p) } }); }
-      content.push({ type: 'text', text: `Today is ${E.dayKey()}. Write the analysis now.` });
-      btn.textContent = 'Claude is analyzing… (up to a minute)';
-      const r = await AI.ask({ system: ANALYSIS_SYSTEM, content, maxTokens: 16000, timeoutMs: 240000 });
-      if (!r.text) throw new Error('Claude returned an empty report.');
-      const rep = await saveReport({ text: r.text, model: r.model, photoIds: use.map((p) => p.id), photoMeta: use.map((p, i) => photoLine(p, i)), usage: r.usage }, mustEnc ? encKey : null);
+PHOTOS (${use.length}, oldest first). Each photo is preceded by its tags. Faces are blurred/covered on purpose.`)];
+      for (const [i, p] of use.entries()) { const it = items.get(p.id); if (!it?.blob) throw new Error('A photo wasn’t anonymized yet. Try again.'); parts.push(AI.textPart(photoLine(p, i))); parts.push(AI.jpegPart(await toB64(it.blob))); }
+      parts.push(AI.textPart(`Today is ${E.dayKey()}. Write the analysis now.`));
+      btn.textContent = 'Gemini is analyzing… (up to a minute)';
+      const r = await AI.ask({ system: ANALYSIS_SYSTEM, parts, maxTokens: 16000, timeoutMs: 240000 });
+      if (!r.text) throw new Error('Gemini returned an empty report.');
+      const rep = await saveReport({ text: r.text, model: r.model, photoIds: use.map((p) => p.id), photoMeta: use.map((p, i) => photoLine(p, i)), usage: r.usage, anonymized: use.map((p) => items.get(p.id).plan.mode) }, mustEnc ? encKey : null);
       if (L.isLocked()) { toast('Progress report saved. Unlock Photos to read it.', { icon: 'lock', ms: 4000 }); return; }
       s.close(); haptic('success'); viewReport(rep, r.text); app.refresh();
-    } catch (e) { toast(e.message, { tone: 'bad', ms: 5000 }); btn.disabled = false; draw(); }
+    } catch (e) { toast(e.message, { tone: 'bad', ms: e.code === 'rate' ? 8000 : 5000 }); btn.disabled = false; draw(); }
   }
 }
 // Reports: kv 'photoReports'. Text is encrypted with the photo key when encryption is on.
@@ -539,27 +552,47 @@ export function captionFor(list) {
   });
   return lines.join('\n');
 }
+// Share via iOS share sheet: always anonymized copies, reviewed first. Files are prepared before the Share tap
+// so navigator.share() runs straight from that tap (iOS needs a fresh user gesture).
 async function shareSelected() {
   const list = S.photos.filter((p) => sel.has(p.id)).sort((x, y) => (x.ts || 0) - (y.ts || 0));
   if (!list.length) return;
-  // Build the files first so navigator.share() runs straight from the confirm tap (iOS needs a fresh user gesture).
-  const files = [];
-  for (const [i, p] of list.entries()) files.push(new File([await blobOf(p)], `lift-${p.date}-${p.pose}${p.ref ? '-ref' : ''}-${i + 1}.jpg`, { type: 'image/jpeg' }));
   const text = captionFor(list);
-  if (!(await confirmSheet(`Share ${list.length} photo${list.length > 1 ? 's' : ''}?`, 'These photos will leave this phone through the iOS share sheet, wherever you send them (e.g. your assistant chat), and be stored there. Only share shirtless photos. Location and camera data are already stripped. A caption with date, pose, lighting, time and conditions goes with them.', 'Share', false))) return;
-  let shared = false;
-  hold(true);
-  try {
-    try { navigator.clipboard?.writeText(text).catch(() => {}); } catch {}
-    if (navigator.canShare?.({ files, text })) { await navigator.share({ files, text, title: 'Lift progress photos' }); shared = true; }
-    else if (navigator.canShare?.({ files })) { await navigator.share({ files, title: 'Lift progress photos' }); shared = true; toast('Caption copied: paste it with the photos', { ms: 3500 }); }
-  } catch (e) { if (e.name === 'AbortError') { hold(false); return; } }
-  finally { setTimeout(() => hold(false), 1500); }
-  if (!shared) {
-    for (const f of [...files, new File([text], `lift-photos-caption-${E.dayKey()}.txt`, { type: 'text/plain' })]) { const a = h('a', { href: URL.createObjectURL(f), download: f.name }); document.body.append(a); a.click(); a.remove(); await new Promise((r) => setTimeout(r, 250)); }
-    toast('Sharing not supported here: downloaded the photos + a caption file', { ms: 3500 });
-  }
-  selecting = false; sel.clear(); app.refresh();
+  const items = []; const opts = { edge: MAX_EDGE, quality: 0.9 };
+  const name = (p, i) => `lift-${p.date}-${p.pose}${p.ref ? '-ref' : ''}-${i + 1}.jpg`;
+  const grid = h('div', { class: 'anon-grid' });
+  const btn = h('button', { class: 'btn primary', disabled: true }, 'Hiding faces…');
+  const draw = () => {
+    grid.replaceChildren(...list.map((p, i) => { const it = items[i]; const cap = `${p.date.slice(2)} ${lab(POSES, p.pose) || p.pose}`;
+      return it ? A.previewTile(it, { caption: cap, onAdjust: async () => { if (await adjustItem(it, opts)) draw(); } })
+        : h('div', { class: 'anon-tile loading' }, h('div', { class: 'anon-thumb' }, h('span', { class: 'photo-tag' }, cap)), h('div', { class: 'anon-meta muted tiny' }, 'Hiding face…')); }));
+    const ok = items.length === list.length; btn.disabled = !ok; btn.textContent = ok ? `Share ${list.length} anonymized photo${list.length > 1 ? 's' : ''}` : `Hiding faces… ${items.length}/${list.length}`;
+  };
+  let closed = false;
+  const s = track(sheet(h('div', { class: 'stack' },
+    h('div', { class: 'small' }, 'These anonymized copies are what leaves your phone: your face is blurred and covered here first. Adjust any box before sharing. Your stored photos stay unchanged.'),
+    grid,
+    h('div', { class: 'muted tiny' }, 'They go wherever you send them through the iOS share sheet and are stored there. Only share shirtless photos. Location and camera data are stripped. A caption with date, pose, lighting, time and conditions goes with them.')),
+    { title: `Share ${list.length} photo${list.length > 1 ? 's' : ''}?`, tall: true, actions: [btn], onClose: () => { closed = true; A.release(items); } }));
+  draw();
+  try { await A.prepare(list, blobOf, { ...opts, onEach: (i, it) => { if (closed) return; items[i] = it; draw(); } }); }
+  catch (e) { toast('Couldn’t prepare photos: ' + e.message, { tone: 'bad', ms: 4500 }); return; }
+  btn.onclick = async () => {
+    const files = items.map((it, i) => new File([it.blob], name(it.p, i), { type: 'image/jpeg' }));
+    let shared = false;
+    hold(true);
+    try {
+      try { navigator.clipboard?.writeText(text).catch(() => {}); } catch {}
+      if (navigator.canShare?.({ files, text })) { await navigator.share({ files, text, title: 'Lift progress photos' }); shared = true; }
+      else if (navigator.canShare?.({ files })) { await navigator.share({ files, title: 'Lift progress photos' }); shared = true; toast('Caption copied: paste it with the photos', { ms: 3500 }); }
+    } catch (e) { if (e.name === 'AbortError') { hold(false); return; } }
+    finally { setTimeout(() => hold(false), 1500); }
+    if (!shared) {
+      for (const f of [...files, new File([text], `lift-photos-caption-${E.dayKey()}.txt`, { type: 'text/plain' })]) { const a = h('a', { href: URL.createObjectURL(f), download: f.name }); document.body.append(a); a.click(); a.remove(); await new Promise((r) => setTimeout(r, 250)); }
+      toast('Sharing not supported here: downloaded the anonymized photos + a caption file', { ms: 3500 });
+    }
+    s.close(); selecting = false; sel.clear(); app.refresh();
+  };
 }
 
 // ───────────────────────── Separate photo export / import (never part of the regular backup)
@@ -568,7 +601,7 @@ async function exportPhotos() {
   for (const p of S.photos) { const { blob, enc, ...meta } = p; out.push({ ...meta, dataUrl: await blobToDataURL(await blobOf(p)) }); }
   const name = `lift-photos-${E.dayKey()}.json`;
   const file = new File([JSON.stringify({ app: 'lift', kind: 'photos', format: 1, exportedAt: new Date().toISOString(), photos: out })], name, { type: 'application/json' });
-  if (!(await confirmSheet('Export photos?', `This makes one file with all ${S.photos.length} photos in it, NOT encrypted, readable by anyone who gets the file. Only save it somewhere you trust (e.g. Files → On My iPhone). It isn’t needed for the regular backup.`, 'Export', true))) return;
+  if (!(await confirmSheet('Export photos?', `This makes one file with all ${S.photos.length} ORIGINAL photos in it (faces NOT blurred: it’s your restore copy), NOT encrypted, readable by anyone who gets the file. Only save it somewhere you trust (e.g. Files → On My iPhone). It isn’t needed for the regular backup.`, 'Export', true))) return;
   let shared = false; hold(true);
   try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: 'Lift photos export' }); shared = true; } } catch (e) { if (e.name === 'AbortError') { hold(false); return; } }
   finally { setTimeout(() => hold(false), 1500); }
@@ -635,4 +668,4 @@ export function openCamera() {
   function close() { stream?.getTracks().forEach((t) => t.stop()); root.classList.remove('open'); setTimeout(() => root.remove(), 300); }
   start();
 }
-export const _test = { exifDate, captionFor, fairness, encryptAllPlain, pickSet, contextText, ANALYSIS_SYSTEM };
+export const _test = { exifDate, captionFor, fairness, encryptAllPlain, pickSet, contextText, ANALYSIS_SYSTEM, analyzeFlow, shareSelected };
