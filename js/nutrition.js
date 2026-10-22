@@ -265,19 +265,35 @@ function favChips(k) {
       h('span', null, f.name), h('span', { class: 'muted tiny' }, [f.kcal != null ? `${f.kcal} kcal` : null, f.p ? `${f.p} g` : null].filter(Boolean).join(' · ')))))
       : h('div', { class: 'muted tiny' }, 'Save things you eat often (Fairlife, your usual bar, a lunch order) with the numbers from the label. Tap Edit, or flip “save as favorite” when adding.'));
 }
+// v1.6.1: autosave. Every change is saved on its own (debounced while typing) with a "Saved" toast; no Save button to forget.
+const favValid = (f) => f.name.trim() && ((+f.kcal || 0) > 0 || (+f.p || 0) > 0);
 function editFavorites() {
   const favs = structuredClone(T().favorites || []);
   const list = h('div', { class: 'list' });
-  const draw = () => list.replaceChildren(...favs.map((f, i) => h('div', { class: 'fav-edit' },
-    h('input', { class: 'input', value: f.name, placeholder: 'Name', oninput: (e) => (f.name = e.target.value) }),
-    h('input', { class: 'input num', value: f.kcal ?? '', inputmode: 'numeric', placeholder: 'kcal', oninput: (e) => (f.kcal = e.target.value === '' ? null : +e.target.value) }),
-    h('input', { class: 'input num', value: f.p ?? '', inputmode: 'decimal', placeholder: 'g P', oninput: (e) => (f.p = +e.target.value || 0) }),
-    h('button', { class: 'icon-btn', 'aria-label': 'Delete favorite', onclick: () => { favs.splice(i, 1); draw(); } }, icon('trash', 18)))),
-    h('button', { class: 'btn ghost', onclick: () => { favs.push({ id: uid(), name: '', kcal: null, p: 0 }); draw(); } }, icon('plus', 16), ' Add favorite'));
+  const status = h('div', { class: 'fav-status muted tiny' }, 'Changes save automatically.');
+  let timer = null, lastSaved = JSON.stringify(T().favorites || []);
+  const persist = async ({ quiet = false } = {}) => {
+    clearTimeout(timer); timer = null;
+    const next = favs.filter(favValid).map((f) => ({ ...f, name: f.name.trim(), p: +f.p || 0 }));
+    const sig = JSON.stringify(next); if (sig === lastSaved) return false;
+    T().favorites = next; await saveSettings(); lastSaved = sig;
+    status.className = 'fav-status tiny saved'; status.replaceChildren(icon('check', 13), ` Saved · ${next.length} favorite${next.length === 1 ? '' : 's'}`);
+    if (!quiet) toast('Saved', { icon: 'check', ms: 1200 });
+    rerender(); return true;
+  };
+  const soon = () => { clearTimeout(timer); status.className = 'fav-status muted tiny'; status.textContent = 'Saving…'; timer = setTimeout(() => persist(), 700); };
+  const mark = (row, f) => row.classList.toggle('incomplete', !favValid(f) && !!(f.name.trim() || f.kcal || f.p));
+  const draw = () => list.replaceChildren(...favs.map((f, i) => { const row = h('div', { class: 'fav-edit' },
+    h('input', { class: 'input', value: f.name, placeholder: 'Name', oninput: (e) => { f.name = e.target.value; mark(row, f); soon(); } }),
+    h('input', { class: 'input num', value: f.kcal ?? '', inputmode: 'numeric', placeholder: 'kcal', oninput: (e) => { f.kcal = e.target.value === '' ? null : +e.target.value; mark(row, f); soon(); } }),
+    h('input', { class: 'input num', value: f.p ?? '', inputmode: 'decimal', placeholder: 'g P', oninput: (e) => { f.p = e.target.value === '' ? null : +String(e.target.value).replace(',', '.') || 0; mark(row, f); soon(); } }),
+    h('button', { class: 'icon-btn', 'aria-label': 'Delete favorite', onclick: () => { favs.splice(i, 1); draw(); persist(); } }, icon('trash', 18))); mark(row, f); return row; }),
+    h('button', { class: 'btn ghost', onclick: () => { favs.push({ id: uid(), name: '', kcal: null, p: null }); draw(); list.querySelector('.fav-edit:last-of-type .input')?.focus(); } }, icon('plus', 16), ' Add favorite'));
   draw();
-  const s = sheet(h('div', null, h('p', { class: 'muted small pad' }, 'Name · calories · protein per serving, from the label. Leave calories blank if you only track protein for it.'), list), {
+  const s = sheet(h('div', null, h('p', { class: 'muted small pad' }, 'Name · calories · protein per serving, from the label. Leave calories blank if you only track protein for it. Each favorite saves as soon as it has a name and calories or protein.'), status, list), {
     title: 'Favorites', tall: true,
-    actions: [h('button', { class: 'btn primary', onclick: async () => { T().favorites = favs.filter((f) => f.name.trim() && (f.kcal > 0 || f.p > 0)).map((f) => ({ ...f, name: f.name.trim() })); await saveSettings(); s.close(); rerender(); } }, 'Save')],
+    onClose: async () => { await persist({ quiet: true }); const n = favs.filter((f) => !favValid(f) && (f.name.trim() || f.kcal || f.p)).length; if (n) toast(`${n} incomplete favorite${n > 1 ? 's' : ''} not saved: needs a name and calories or protein`, { ms: 3500 }); },
+    actions: [h('button', { class: 'btn primary', onclick: () => s.close() }, 'Done')],
   });
 }
 
@@ -829,13 +845,13 @@ Rules:
 - assumptions: one short sentence (portion size, preparation, what is assumed).
 - included: things you counted (e.g. "cooking oil in the pad thai", "peanuts and sauce"). not_included: plausible extras you did NOT count (e.g. "extra sauce", "drink with meal").
 - No health or medical advice. Output only the JSON.`;
-export async function estimateText(text) {
+export async function estimateText(text, { onStatus, local = false } = {}) {
   const g = await groundingFor(text);
-  if (!(await AI.hasKey())) return localEstimate(g);
-  const r = await AI.ask({ system: FOOD_SYSTEM, schema: FOOD_SCHEMA, maxTokens: 8192,
+  if (local || !(await AI.hasKey())) return localEstimate(g);
+  const r = await AI.ask({ system: FOOD_SYSTEM, schema: FOOD_SCHEMA, maxTokens: 8192, timeoutMs: 60000, onStatus,
     parts: [AI.textPart(`FOOD LOG TEXT:\n${text}\n\nREFERENCE (local database lookups; may be imperfect matches):\n${refLines(g)}`)] });
   const j = r.json;
-  return { source: 'ai', model: r.model, included: j.included || [], not_included: j.not_included || [], notes: j.notes || '',
+  return { source: 'ai', model: r.model, requested: r.requested, fallback: r.fallback, included: j.included || [], not_included: j.not_included || [], notes: j.notes || '',
     items: (j.items || []).map((x) => ({ name: x.name, portion: x.portion, grams: +x.grams || null, kcal: r0(x.kcal), p: r1(x.protein_g), f: r1(x.fat_g), c: r1(x.carbs_g), fb: r1(x.fiber_g), conf: x.confidence, assumptions: x.assumptions, ref: x.reference_used })) };
 }
 function localEstimate(g) {
@@ -855,8 +871,14 @@ function logCard(k) {
   const btn = h('button', { class: 'btn primary', onclick: async () => {
     const text = ta.value.trim(); if (!text) { ta.focus(); return; }
     btn.disabled = true; const label = btn.textContent; btn.textContent = 'Estimating…';
-    try { const res = await estimateText(text); reviewSheet(k, res, meal, text, () => (ta.value = '')); }
-    catch (e) { toast(e.message, { tone: 'bad', ms: e.code === 'rate' ? 8000 : 4500 }); if (e.code === 'nokey' || e.code === 'badkey') AI.aiSettingsSheet(); }
+    const useLocal = async () => { const res = await estimateText(text, { local: true }); reviewSheet(k, res, meal, text, () => (ta.value = '')); };
+    try { const res = await estimateText(text, { onStatus: (m) => (btn.textContent = m) }); reviewSheet(k, res, meal, text, () => (ta.value = '')); }
+    catch (e) {
+      // The typed text stays in the box. For overload/limit/network problems offer the on-device estimate right in the toast.
+      const offer = ['unavailable', 'rate', 'timeout', 'network'].includes(e.code) || /Gemini/.test(e.message);
+      toast(e.message, { tone: 'bad', ms: e.code === 'rate' ? 8000 : 4500, action: offer ? { label: 'Use local estimate', onClick: useLocal } : null });
+      if (e.code === 'nokey' || e.code === 'badkey') AI.aiSettingsSheet();
+    }
     finally { btn.disabled = false; btn.textContent = label; }
   } }, 'Estimate');
   const hint = h('div', { class: 'muted tiny' });
@@ -884,7 +906,7 @@ function reviewSheet(k, res, meal, text, onSaved) {
     res.notes ? h('div', { class: 'muted tiny' }, res.notes) : null].filter(Boolean);
   const s = sheet(h('div', { class: 'stack' },
     h('div', { class: 'muted small' }, `“${text}”`),
-    h('span', { class: 'src ' + (res.source === 'ai' ? 'off' : 'usda') }, res.source === 'ai' ? `Estimated by Gemini (${res.model}) · check portions` : 'On-device USDA match · no AI'),
+    h('span', { class: 'src ' + (res.source === 'ai' ? 'off' : 'usda') }, res.source === 'ai' ? `Estimated by Gemini (${res.model}${res.fallback ? ` · fallback, ${res.requested} was busy` : ''}) · check portions` : 'On-device USDA match · no AI'),
     totalsEl, list, notes.length ? h('div', { class: 'card rv-notes' }, notes) : null, winPicker(meal, (v) => (meal = v)),
     h('div', { class: 'muted tiny' }, 'Edit anything before saving. Each item also goes to My foods so it’s one tap next time.')), {
     title: 'Review estimate', tall: true,

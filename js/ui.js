@@ -100,12 +100,14 @@ export function beep() {
 }
 
 // ── Toast
-export function toast(msg, { icon: ic = null, ms = 2200, tone = '' } = {}) {
+export function toast(msg, { icon: ic = null, ms = 2200, tone = '', action = null } = {}) {
   const host = $('#toasts');
-  const el = h('div', { class: 'toast ' + tone }, ic ? icon(ic, 18) : null, h('span', null, msg));
+  const hide = () => { el.classList.remove('in'); setTimeout(() => el.remove(), 400); };
+  const el = h('div', { class: 'toast ' + tone + (action ? ' has-action' : '') }, ic ? icon(ic, 18) : null, h('span', null, msg),
+    action ? h('button', { class: 'toast-btn', onclick: () => { hide(); action.onClick(); } }, action.label) : null);
   host.appendChild(el);
   requestAnimationFrame(() => el.classList.add('in'));
-  setTimeout(() => { el.classList.remove('in'); setTimeout(() => el.remove(), 400); }, ms);
+  setTimeout(hide, action ? Math.max(ms, 9000) : ms);
 }
 
 // ── Bottom sheet with drag-to-dismiss
@@ -134,6 +136,14 @@ export function sheet(content, { title = '', onClose, tall = false, actions = nu
   head.addEventListener('pointermove', (e) => { if (y0 == null) return; dy = Math.max(0, e.clientY - y0); el.style.transform = `translateY(${dy}px)`; });
   const end = () => { if (y0 == null) return; el.style.transition = ''; y0 = null; if (dy > 110) close(); else el.style.transform = ''; };
   head.addEventListener('pointerup', end); head.addEventListener('pointercancel', end);
+  // v1.6.1: also swipe down from the content when it's scrolled to the top (iOS-style), except inside drag areas
+  let t0 = null, ty = 0;
+  body.addEventListener('touchstart', (e) => { if (e.touches.length !== 1 || body.scrollTop > 0 || e.target.closest('.anon-stage, input, textarea, select, [data-noswipe]')) { t0 = null; return; } t0 = { x: e.touches[0].clientX, y: e.touches[0].clientY }; ty = 0; }, { passive: true });
+  body.addEventListener('touchmove', (e) => { if (!t0) return; const dy = e.touches[0].clientY - t0.y, dx = Math.abs(e.touches[0].clientX - t0.x);
+    if (ty === 0 && (dy <= 4 || dx > dy || body.scrollTop > 0)) { if (dy < -4 || dx > 8) t0 = null; return; }
+    ty = Math.max(0, dy); el.style.transition = 'none'; el.style.transform = `translateY(${ty}px)`; if (e.cancelable) e.preventDefault(); }, { passive: false });
+  const tend = () => { if (!t0) return; t0 = null; el.style.transition = ''; if (ty > 110) close(); else el.style.transform = ''; ty = 0; };
+  body.addEventListener('touchend', tend); body.addEventListener('touchcancel', tend);
   return { close, el, body };
 }
 

@@ -87,19 +87,42 @@ export function toGeminiSchema(s) {
 // Parts helpers so callers don't depend on the wire format.
 export const textPart = (text) => ({ text });
 export const jpegPart = (b64) => ({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
-// One generateContent call. Returns { text, json?, usage, model, stop }.
-export async function ask({ system, parts, schema, maxTokens = 8192, timeoutMs = 180000 }) {
+// Fallback chain when the chosen model is overloaded (500/503/504): 2 retries with backoff, then the next free model.
+export const FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+const RETRY_MS = [1200, 3500];
+const TRANSIENT = new Set([500, 502, 503, 504]);
+export const _cfg = { sleep: (ms) => new Promise((r) => setTimeout(r, ms + Math.random() * 400)) };
+async function callOnce(model, key, body, timeoutMs) {
+  const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), timeoutMs);
+  try { return await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: headers(key), body: JSON.stringify(body), signal: ctl.signal, ...fetchOpts }); }
+  catch (e) { throw Object.assign(new Error(e.name === 'AbortError' ? 'Gemini took too long. Try again.' : navigator.onLine ? 'Couldn’t reach Gemini.' : 'You’re offline.'), { code: e.name === 'AbortError' ? 'timeout' : 'network' }); }
+  finally { clearTimeout(tm); }
+}
+// One generateContent request (with retry + fallback). Returns { text, json?, usage, model, requested, fallback, tries, stop }.
+export async function ask({ system, parts, schema, maxTokens = 8192, timeoutMs = 180000, onStatus }) {
   const key = await getKey();
-  const model = (await aiStatus()).model;
+  const requested = (await aiStatus()).model;
   const body = { contents: [{ role: 'user', parts }], generationConfig: { maxOutputTokens: maxTokens } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   if (schema) { body.generationConfig.responseMimeType = 'application/json'; body.generationConfig.responseSchema = toGeminiSchema(schema); }
-  const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), timeoutMs);
-  let res;
-  try { res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: headers(key), body: JSON.stringify(body), signal: ctl.signal, ...fetchOpts }); }
-  catch (e) { throw new Error(e.name === 'AbortError' ? 'Gemini took too long. Try again.' : navigator.onLine ? 'Couldn’t reach Gemini.' : 'You’re offline.'); }
-  finally { clearTimeout(tm); }
-  if (!res.ok) throw await errFrom(res, model);
+  const chain = [requested, ...FALLBACKS.filter((m) => m !== requested)];
+  let res = null, model = requested, tries = 0, lastErr = null;
+  outer: for (const [mi, m] of chain.entries()) {
+    model = m;
+    for (let attempt = 0; attempt <= RETRY_MS.length; attempt++) {
+      tries++;
+      if (mi || attempt) onStatus?.(mi ? `${requested} is busy. Trying ${m}…` : `Gemini busy, retrying (${attempt}/${RETRY_MS.length})…`);
+      try { res = await callOnce(m, key, body, timeoutMs); } catch (e) { if (e.code === 'network' && !navigator.onLine) throw e; lastErr = e; res = null; continue outer; } // timeout/network: next model, don't wait again
+      if (res && res.ok) break outer;
+      if (res && !TRANSIENT.has(res.status)) {
+        if (res.status === 404 && mi === 0 && m !== DEFAULT_MODEL && chain.length > 1) { lastErr = await errFrom(res, m); continue outer; } // bad custom id → try the free fallbacks
+        throw await errFrom(res, m);
+      }
+      if (res) lastErr = await errFrom(res, m);
+      if (attempt < RETRY_MS.length) await _cfg.sleep(RETRY_MS[attempt]);
+    }
+  }
+  if (!res || !res.ok) { if (lastErr?.code === 'timeout' || lastErr?.code === 'network') throw lastErr; } if (!res || !res.ok) throw Object.assign(new Error(`Gemini is overloaded right now (${chain.join(', ')} all busy after retries). Your text is kept.`), { code: 'unavailable', cause: lastErr });
   const j = await res.json();
   if (j.promptFeedback?.blockReason) throw new Error(`Gemini declined this request (${j.promptFeedback.blockReason}).`);
   const c = j.candidates?.[0];
@@ -109,7 +132,7 @@ export async function ask({ system, parts, schema, maxTokens = 8192, timeoutMs =
   if (stop === 'MAX_TOKENS' && schema) throw new Error('Gemini’s answer was cut off. Try fewer items at once.');
   let json;
   if (schema) { try { json = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { throw new Error('Gemini returned something unreadable. Try again.'); } }
-  return { text, json, usage: j.usageMetadata, model: j.modelVersion || model, stop };
+  return { text, json, usage: j.usageMetadata, model: j.modelVersion || model, requested, fallback: model !== requested, tries, stop };
 }
 
 // Tiny, safe Markdown → DOM (headings, bullets, numbered lists, bold/italic). Text is never injected as HTML.

@@ -1,5 +1,5 @@
 // Offline-first service worker. Caches the app shell; makes no other network requests.
-const VERSION = 'lift-v1.6.0';
+const VERSION = 'lift-v1.6.1';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './css/app.css', './js/version.js', './js/app.js', './js/ui.js', './js/db.js', './js/data.js', './js/engine.js',
   './js/store.js', './js/logger.js', './js/progress.js', './js/body.js', './js/onboarding.js', './js/nutrition.js', './js/photos.js', './js/photolock.js', './js/ai.js', './js/anon.js', './js/vendor/zxing.min.js', './data/fndds.json', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/icon-maskable-512.png'];
 // On-device face detector (MediaPipe, ~14 MB): cached at install too, but best-effort so a flaky connection can't block the update.

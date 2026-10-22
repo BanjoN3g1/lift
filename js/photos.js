@@ -276,7 +276,8 @@ PHOTOS (${use.length}, oldest first). Each photo is preceded by its tags. Faces 
       for (const [i, p] of use.entries()) { const it = items.get(p.id); if (!it?.blob) throw new Error('A photo wasn’t anonymized yet. Try again.'); parts.push(AI.textPart(photoLine(p, i))); parts.push(AI.jpegPart(await toB64(it.blob))); }
       parts.push(AI.textPart(`Today is ${E.dayKey()}. Write the analysis now.`));
       btn.textContent = 'Gemini is analyzing… (up to a minute)';
-      const r = await AI.ask({ system: ANALYSIS_SYSTEM, parts, maxTokens: 16000, timeoutMs: 240000 });
+      const r = await AI.ask({ system: ANALYSIS_SYSTEM, parts, maxTokens: 16000, timeoutMs: 240000, onStatus: (m) => (btn.textContent = m) });
+      if (r.fallback) toast(`${r.requested} was busy: answered by ${r.model}`, { ms: 4000 });
       if (!r.text) throw new Error('Gemini returned an empty report.');
       const rep = await saveReport({ text: r.text, model: r.model, photoIds: use.map((p) => p.id), photoMeta: use.map((p, i) => photoLine(p, i)), usage: r.usage, anonymized: use.map((p) => items.get(p.id).plan.mode) }, mustEnc ? encKey : null);
       if (L.isLocked()) { toast('Progress report saved. Unlock Photos to read it.', { icon: 'lock', ms: 4000 }); return; }
