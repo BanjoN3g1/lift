@@ -204,7 +204,7 @@ function photoLine(p, i) {
 }
 function contextText() {
   const n = S.settings.nutrition;
-  const rot = [...new Set(ROTATION)].map((id) => { const w = WORKOUTS[id]; return `${id} ${w.name}: ${w.blocks.flat().map((b) => EX[b.ex]?.name || b.ex).join(', ')}`; }).join('\n');
+  const rot = [...new Set([...ROTATION, 'V'])].map((id) => { const w = WORKOUTS[id]; return `${id}${w.bonus ? ' (optional bonus day, outside the rotation)' : ''} ${w.name}: ${w.blocks.flat().map((b) => EX[b.ex]?.name || b.ex).join(', ')}`; }).join('\n');
   const ws = S.body.filter((b) => b.weight > 0);
   const bw = ws.length ? `Bodyweight log: latest ${ws.at(-1).weight} ${ws.at(-1).wUnit || 'lb'} on ${ws.at(-1).date}${ws.length > 1 ? `; first ${ws[0].weight} ${ws[0].wUnit || 'lb'} on ${ws[0].date}` : ''}.` : 'No bodyweight logged in the app.';
   let wk = ''; try { const a = analyzeNutrition('week'); if (a.logged) wk = `Last 7 days of food logs: ${a.logged} days logged, avg protein ${Math.round(a.comps.p?.v || 0)} g${a.comps.kcal ? `, avg ${Math.round(a.comps.kcal.v)} kcal` : ''}.`; } catch {}

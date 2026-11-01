@@ -114,7 +114,8 @@ function renderHome(page) {
     h('button', { class: 'btn primary big', disabled: !!S.active, onclick: () => { unlockAudio(); haptic('medium'); startWorkout(wid, { short, planned: true }); } }, S.active ? 'Finish current workout first' : 'Start workout'),
     h('div', { class: 'hero-actions' },
       h('button', { class: 'btn ghost', onclick: () => skipNext(wid) }, icon('skip', 16), ' Skip'),
-      h('button', { class: 'btn ghost', onclick: () => chooseWorkout() }, icon('swap', 16), ' Do another')));
+      h('button', { class: 'btn ghost', onclick: () => chooseWorkout() }, icon('swap', 16), ' Do another')),
+    wid === 'B2' && !S.active ? h('button', { class: 'btn ghost v-instead', onclick: () => { unlockAudio(); haptic('medium'); startWorkout('V', { short, planned: true }); } }, workoutBadge('V', 'sm'), ' Do V (Vanity) instead of B2') : null);
   page.append(hero);
 
   // Rotation strip
@@ -167,7 +168,7 @@ async function skipNext(wid) {
 
 function chooseWorkout() {
   const s = sheet(h('div', { class: 'list' }, Object.values(WORKOUTS).map((w) => h('button', { class: 'row press', onclick: () => { s.close(); unlockAudio(); startWorkout(w.id, { short: !!app.shortPref, planned: w.id === S.d.next }); } },
-    workoutBadge(w.id), h('div', { class: 'grow' }, h('div', { class: 'title-s' }, w.name), h('div', { class: 'muted small' }, `~${w.est} min` + (w.id === S.d.next ? ' · next in rotation' : ''))), icon('chevron', 18)))),
+    workoutBadge(w.id), h('div', { class: 'grow' }, h('div', { class: 'title-s' }, w.name), h('div', { class: 'muted small' }, `~${w.est} min` + (w.id === S.d.next ? ' · next in rotation' : w.bonus ? ' · bonus, rotation unchanged' : ''))), icon('chevron', 18)))),
     { title: 'Pick a workout' });
   s.body.append(h('p', { class: 'muted small pad' }, 'Doing a different workout today doesn’t move the rotation — your next planned workout stays queued.'));
 }

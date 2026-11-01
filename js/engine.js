@@ -170,7 +170,7 @@ export function slotExercise(item, settings) {
 export function targetsFor(item, exId, unit, ctx) {
   const { states, hist, phase, settings } = ctx;
   const ex = EX[exId];
-  const rir = rirRange(ex.type, phase);
+  const rir = item.rir && phase === 'normal' ? item.rir : rirRange(ex.type, phase);
   const key = item.slot + '|' + exId;
   const st = states[key];
   const bwKg = toKg(settings.bodyweight || 0, settings.bodyweightUnit || 'lb');
@@ -206,10 +206,13 @@ export function buildSession(workoutId, ctx, { short = false, planned = true, ro
       const unit = settings.unitByEx?.[exId] || settings.unit || 'lb';
       const t = targetsFor(item, exId, unit, ctx);
       entries.push({ slot: item.slot, ex: exId, baseEx: item.ex, group: block.length > 1 ? 'g' + gi : null, optional: !!item.optional, bonus: !!item.bonus,
-        included: !(item.optional || item.bonus), tip: item.tip || null, unit, rir: t.rir, prevStatus: t.status, sets: t.sets, skipped: false });
+        included: !(item.optional || item.bonus), tip: item.tip || null, unit, rir: t.rir, prevStatus: t.status, sets: t.sets, skipped: false, block: gi, rest: wk.rest || null });
     }
   }
-  if (short) {
+  if (short && wk.shortBlocks) {
+    // Workout-specific short version (V: exercises 1–3, ~30 min).
+    for (const e of entries) { if (e.block > wk.shortBlocks && e.included) { e.included = false; e.shortCut = true; } }
+  } else if (short) {
     // Short version: first two core exercises of the workout (~25 min).
     let n = 0;
     for (const e of entries) { if (e.included && n < 2) n++; else e.included = false; e.shortCut = !e.included && !(e.optional || e.bonus); }

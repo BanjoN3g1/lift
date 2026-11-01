@@ -563,3 +563,8 @@ body.sheet-open #view { overflow: hidden; }
 .fav-status { display: flex; align-items: center; gap: 6px; }
 .fav-status.saved { color: var(--green); }
 .fav-edit.incomplete .input:first-child { border-color: rgba(255,214,10,.5); }
+/* v1.7 Vanity bonus day */
+.wk-card.vanity { display: flex; flex-direction: column; align-items: stretch; gap: 10px; text-align: left; margin-bottom: 12px; border: 1px solid rgba(255,214,10,.28); background: linear-gradient(160deg, rgba(255,214,10,.10), rgba(255,159,10,.04)), var(--card, rgba(28,28,30,.7)); }
+.wk-card.vanity .two-btn { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.v-instead { width: 100%; }
+.hero .v-instead { margin-top: 8px; }

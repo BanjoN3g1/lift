@@ -1,7 +1,7 @@
 import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, segmented, confetti, beep, unlockAudio } from './ui.js';
 import { S, derive, ctx, saveSettings, putSession, delSession, saveActiveSoon, bwKg, dispKg, discardActive, activeDoneSets } from './store.js';
 import * as E from './engine.js';
-import { EX, WORKOUTS, EQUIP_LABEL } from './data.js';
+import { EX, WORKOUTS, EQUIP_LABEL, ROTATION, V_REPLACES } from './data.js';
 import { app, workoutBadge, weekInfo } from './app.js';
 
 // The session being shown in the logger: S.active (live) or an edit copy of a past session.
@@ -9,7 +9,10 @@ let L = null; // { s, mode: 'live'|'edit', root }
 
 export async function startWorkout(wid, { short = false, planned = true } = {}) {
   if (S.active) { app.go('train'); return; }
+  // V counts in the rotation only as a stand-in for B2 when B2 is next; otherwise it's an off-rotation bonus.
+  if (WORKOUTS[wid]?.bonus) planned = planned && ROTATION[S.d.nextIdx] === V_REPLACES;
   const s = E.buildSession(wid, ctx(), { short, planned, rotIndex: S.d.nextIdx });
+  if (WORKOUTS[wid]?.bonus) { s.bonus = !planned; if (planned) s.insteadOf = ROTATION[S.d.nextIdx]; }
   S.active = s; await putSession(s);
   app.go('train', { force: true });
 }
@@ -25,7 +28,8 @@ export function renderTrain(page) {
   // Picker
   page.append(h('header', { class: 'large-head' }, h('div', null, h('div', { class: 'eyebrow' }, 'Rotation · A B1 C D A B2 C D'), h('h1', null, 'Train'))));
   const next = S.d.next;
-  page.append(h('div', { class: 'list cards' }, Object.values(WORKOUTS).map((w) => {
+  page.append(vanityCard(next));
+  page.append(h('div', { class: 'list cards' }, Object.values(WORKOUTS).filter((w) => !w.bonus).map((w) => {
     const n = w.blocks.flat();
     return h('button', { class: 'card wk-card press' + (w.id === next ? ' next' : ''), style: { '--h1': w.hue[0], '--h2': w.hue[1] }, onclick: () => { unlockAudio(); haptic('medium'); startWorkout(w.id, { short: !!app.shortPref, planned: w.id === next }); } },
       workoutBadge(w.id, 'lg'),
@@ -35,6 +39,24 @@ export function renderTrain(page) {
       icon('chevron', 18));
   })));
   page.append(h('p', { class: 'muted small pad' }, 'Tap any workout to start it. Doing one out of order is fine — only the planned one advances the rotation.'));
+}
+
+// Workout-level rest override (V: 60–90 s → 90 s everywhere, incl. the Smith press); otherwise the usual settings.
+function restFor(e) { if (e.rest) return e.rest; return e.group ? S.settings.restSuperset : EX[e.ex].type === 'compound' ? S.settings.restCompound : S.settings.restSmall; }
+// Bonus card for the optional V day. When B2 is next, it also offers "Do V instead of B2" (never for B1).
+export function vanityCard(next) {
+  const w = WORKOUTS.V; const items = w.blocks.flat();
+  const go = (planned, short) => { unlockAudio(); haptic('medium'); startWorkout('V', { short, planned }); };
+  return h('section', { class: 'card wk-card vanity', style: { '--h1': w.hue[0], '--h2': w.hue[1] } },
+    h('div', { class: 'row gap-s', style: { alignItems: 'center' } }, workoutBadge('V', 'lg'),
+      h('div', { class: 'grow' }, h('div', { class: 'eyebrow' }, 'Bonus · anytime'), h('div', { class: 'title' }, 'Bonus: Vanity day'),
+        h('div', { class: 'muted small' }, items.map((i) => EX[i.ex].name).join(' · ')),
+        h('div', { class: 'muted small' }, `~${w.est} min · short ~${w.estShort} min (first 3) · rest 60–90 s`))),
+    h('div', { class: 'muted tiny' }, next === V_REPLACES ? 'As a bonus it doesn’t move your rotation. Or swap it in for B2, which is next.' : 'Doesn’t move your rotation: your next planned workout stays queued.'),
+    h('div', { class: 'two-btn' },
+      h('button', { class: 'btn primary', disabled: !!S.active, onclick: () => go(false, !!app.shortPref) }, 'Start as bonus'),
+      h('button', { class: 'btn ghost', disabled: !!S.active, onclick: () => go(false, true) }, 'Short (~30 min)')),
+    next === V_REPLACES ? h('button', { class: 'btn ghost v-instead', disabled: !!S.active, onclick: () => go(true, !!app.shortPref) }, icon('swap', 16), ' Do V instead of B2') : null);
 }
 
 // ───────────────────────── Logger
@@ -52,7 +74,7 @@ function renderLogger(page, s, mode) {
       mode === 'edit' ? h('button', { class: 'btn small ghost', onclick: () => { app.editSession = null; app.go('progress', { force: true, seg: 'history' }); } }, 'Cancel') :
         h('div', { class: 'log-head-l' }, h('button', { class: 'btn small danger-ghost', 'aria-label': 'Cancel workout', onclick: () => cancelWorkout() }, 'Cancel'),
           h('button', { class: 'icon-btn', 'aria-label': 'Workout options', onclick: () => sessionMenu() }, icon('more', 22))),
-      h('div', { class: 'log-title' }, workoutBadge(s.workout, 'sm'), h('div', null, h('div', { class: 'title-s' }, w.name), h('div', { class: 'muted tiny' }, mode === 'edit' ? 'Editing' : elapsed, s.short ? ' · short' : '', s.deload ? ' · deload' : ''))),
+      h('div', { class: 'log-title' }, workoutBadge(s.workout, 'sm'), h('div', null, h('div', { class: 'title-s' }, w.name), h('div', { class: 'muted tiny' }, mode === 'edit' ? 'Editing' : elapsed, s.short ? ' · short' : '', s.deload ? ' · deload' : '', s.bonus ? ' · bonus (rotation unchanged)' : '', s.insteadOf ? ` · instead of ${s.insteadOf}` : ''))),
       h('button', { class: 'btn small primary', onclick: () => (mode === 'edit' ? saveEdit() : finish()) }, mode === 'edit' ? 'Save' : 'Finish')),
     progress);
   page.append(head);
@@ -134,7 +156,7 @@ const STATUS_TXT = { up: '▲ Weight up — you hit the top of the range', hold:
 function exCard(i) {
   const e = L.s.entries[i];
   const ex = EX[e.ex];
-  const rest = e.group ? S.settings.restSuperset : ex.type === 'compound' ? S.settings.restCompound : S.settings.restSmall;
+  const rest = restFor(e);
   const card = h('section', { class: 'card ex' + (e.skipped ? ' skipped' : '') + (!e.included ? ' collapsed' : ''), 'data-ei': i });
   const note = S.settings.notes?.[e.ex];
   card.append(h('div', { class: 'ex-head' },
@@ -158,7 +180,7 @@ function exCard(i) {
   if (e.tip && !e.optional) info.push(h('div', { class: 'muted tiny' }, e.tip));
   if (ex.note) info.push(h('div', { class: 'muted tiny' }, ex.note));
   if (note) info.push(h('button', { class: 'ex-note', onclick: () => noteSheet(e, i) }, icon('note', 14), ' ', note));
-  if (!e.sets.some((x) => x.tw != null) && !E.isNoLoad(e.ex) && !e.sets.some((x) => x.done)) info.push(h('div', { class: 'muted tiny first' }, 'First time: pick a weight you could do for a few more reps. This session becomes your baseline.'));
+  if (!e.sets.some((x) => x.tw != null) && !E.isNoLoad(e.ex) && !e.sets.some((x) => x.done)) info.push(h('div', { class: 'muted tiny first' }, L.s.workout === 'V' ? 'No history for this lift yet: pick a weight you can do for the top of the range at ~2–3 RIR. This session becomes your baseline.' : 'First time: pick a weight you could do for a few more reps. This session becomes your baseline.'));
   card.append(h('div', { class: 'ex-info' }, info));
   card.append(h('div', { class: 'set-head muted tiny' }, h('span', null, 'Set'), h('span', null, E.isBW(e.ex) ? `+${e.unit}` : E.isNoLoad(e.ex) ? '' : e.unit), h('span', null, 'Reps'), h('span', null, 'RIR'), h('span')));
   e.sets.forEach((x, j) => card.append(setRow(e, i, x, j)));
@@ -278,12 +300,12 @@ function afterSet(e, i, j) {
       card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
-    startRest(S.settings.restSuperset, 'Superset rest');
+    startRest(restFor(e), 'Superset rest');
     return;
   }
   if (L.mode !== 'live') return;
   const ex = EX[e.ex];
-  startRest(ex.type === 'compound' ? S.settings.restCompound : S.settings.restSmall, ex.name);
+  startRest(restFor(e), ex.name);
 }
 
 // ───────────────────────── Rest timer

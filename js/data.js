@@ -135,7 +135,25 @@ export const WORKOUTS = {
   },
 };
 
+// V: optional bonus "Vanity" day (v1.7). Not part of ROTATION: done as a bonus it never moves the pointer;
+// done "instead of B2" (only offered when B2 is next) it takes B2's place and advances past it.
+// Exercise ids are the same as on other days, so starting weights come from Sal's history for those lifts.
+WORKOUTS.V = {
+  id: 'V', name: 'Vanity: Delts, Arms & Abs', est: 45, estShort: 30, hue: ['#FFD60A', '#FF9F0A'], bonus: true, rest: 90, shortBlocks: 3,
+  blocks: [
+    [{ slot: 'V1', ex: 'smith_incline', sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12, label: '~1 RIR' }], tip: 'Bench at ~30°. Last set to ~1 rep in reserve.' }],
+    [{ slot: 'V2', ex: 'cable_lateral', sets: S(4, 12, 20), tip: 'Behind-the-body: cable low and behind you. Finish each set with lengthened partials (bottom half) to failure.' },
+     { slot: 'V3', ex: 'rear_delt_cable', sets: S(3, 15, 20), tip: 'Reverse cable fly for rear delts. Arms long, sweep out wide.' }],
+    [{ slot: 'V4', ex: 'bayesian_curl', sets: S(3, 10, 15), tip: 'Face away from the cable, arm behind the body: long-head stretch.' },
+     { slot: 'V5', ex: 'oh_tri_ext', sets: S(3, 10, 15), tip: 'Overhead: long-head stretch. Full lockout.' }],
+    [{ slot: 'V6', ex: 'cable_fly_lth', sets: S(3, 12, 15) }, { slot: 'V7', ex: 'hammer_curl', sets: S(2, 10, 12) }],
+    [{ slot: 'V8', ex: 'cable_crunch', sets: S(3, 10, 15) }, { slot: 'V9', ex: 'hanging_leg_raise', sets: S(2, 8, 15), rir: [1, 2], tip: 'Two sets to 1–2 reps in reserve. Curl the pelvis up, no swinging.' }],
+  ],
+};
+export const BONUS = ['V'];
 export const ROTATION = ['A', 'B1', 'C', 'D', 'A', 'B2', 'C', 'D'];
+// The only rotation slot V may replace.
+export const V_REPLACES = 'B2';
 
 // Starting points from Sal's estimated old 1RMs (lb). Only these are seeded; every
 // other lift starts blank so the first session sets a real baseline.

@@ -130,7 +130,7 @@ function history(body) {
     const st = E.sessionStats(s, bwKg());
     const prs = s.entries.reduce((a, e) => a + e.sets.filter((x) => x.pr && x.done).length, 0);
     body.append(h('button', { class: 'card hist press', onclick: () => detail(s) }, workoutBadge(s.workout, 'sm'),
-      h('div', { class: 'grow' }, h('div', { class: 'title-s' }, w.name, s.short ? h('span', { class: 'pill tiny' }, 'short') : null, s.deload ? h('span', { class: 'pill tiny' }, 'deload') : null),
+      h('div', { class: 'grow' }, h('div', { class: 'title-s' }, w.name, s.short ? h('span', { class: 'pill tiny' }, 'short') : null, s.bonus ? h('span', { class: 'pill tiny' }, 'bonus') : null, s.insteadOf ? h('span', { class: 'pill tiny' }, 'for ' + s.insteadOf) : null, s.deload ? h('span', { class: 'pill tiny' }, 'deload') : null),
         h('div', { class: 'muted tiny' }, `${fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric' })} · ${s.duration ? Math.round(s.duration / 60000) + ' min · ' : ''}${st.sets} sets · ${dispKg(st.vol)} ${U()}`)),
       prs ? h('span', { class: 'pr-chip' }, icon('trophy', 12), ' ', prs) : null, icon('chevron', 16)));
   }
