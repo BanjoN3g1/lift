@@ -217,7 +217,10 @@ export function buildSession(workoutId, ctx, { short = false, planned = true, ro
         included: !(item.optional || item.bonus), tip: item.tip || null, unit, rir: t.rir, prevStatus: t.status, sets: t.sets, skipped: false, block: gi, rest: wk.rest || null });
     }
   }
-  if (short && wk.shortBlocks) {
+  if (short && wk.shortKeep) {
+    // Workout-specific short version: keep only the listed blocks (1-based).
+    for (const e of entries) { if (e.included && !wk.shortKeep.includes(e.block)) { e.included = false; e.shortCut = true; } }
+  } else if (short && wk.shortBlocks) {
     // Workout-specific short version (V: exercises 1–3, ~30 min).
     for (const e of entries) { if (e.block > wk.shortBlocks && e.included) { e.included = false; e.shortCut = true; } }
   } else if (short) {

@@ -42,6 +42,7 @@ export const EX = {
   cs_row:       { name: 'Chest-Supported Row', type: 'compound', equip: 'machine', muscles: 'Mid back · lats', alts: ['seated_cable_row', 'machine_row', 'sa_db_row'] },
   seated_cable_row:{ name: 'Seated Cable Row', type: 'compound', equip: 'cable', muscles: 'Mid back · lats', alts: ['cs_row', 'machine_row', 'sa_db_row'] },
   machine_row:  { name: 'Machine Row', type: 'compound', equip: 'machine', muscles: 'Mid back', alts: ['cs_row', 'seated_cable_row', 'sa_db_row'] },
+  incline_db_row:{ name: 'Chest-Supported Incline DB Row', type: 'compound', equip: 'dumbbell', muscles: 'Mid back · lats', alts: ['cs_row', 'sa_db_row', 'seated_cable_row'], perHand: true },
   sa_db_row:    { name: 'Single-Arm DB Row', type: 'compound', equip: 'dumbbell', muscles: 'Lats · mid back', alts: ['sa_cable_row', 'cs_row', 'seated_cable_row'] },
   sa_cable_row: { name: 'Single-Arm Cable Row', type: 'small', equip: 'cable', muscles: 'Lats', alts: ['sa_db_row', 'seated_cable_row', 'machine_row'] },
   // ── Arms
@@ -150,43 +151,44 @@ WORKOUTS.V = {
     [{ slot: 'V8', ex: 'cable_crunch', sets: S(3, 10, 15) }, { slot: 'V9', ex: 'hanging_leg_raise', sets: S(2, 8, 15), rir: [1, 2], tip: 'Two sets to 1–2 reps in reserve. Curl the pelvis up, no swinging.' }],
   ],
 };
-// v1.8: 3-session full-body rotation built for 2–3 sessions/week (banker schedule).
-// Every session hits back, chest, side delts, arms and one lower-body lift, so a 2-session
-// week still trains everything ~2x. Order = priority: antagonist push/pull superset first,
-// delts second, legs third, arms/abs last. Short mode keeps blocks 1–2 (~25 min) for
-// low-sleep mornings. A–D are retired (kept so old sessions still render in history).
+// v1.8.1: 3-session full-body rotation built for 2–3 sessions/week (banker schedule), laid out by STATION:
+// at most one barbell lift per session (straight sets, done first, then you leave the rack), and every
+// superset lives at a single station (one bench + dumbbells, the pull-up bar, or one cable crossover).
+// Every session hits back, chest, side delts and arms; each has one lower-body lift. Short mode
+// (shortKeep) keeps the two upper-body blocks that matter most (~25 min) and drops the barbell lift.
+// A–D are retired (kept so old sessions still render in history).
 WORKOUTS.F1 = {
-  id: 'F1', name: 'Full Body 1 · Incline + Pull-Up + Heavy Squat', est: 50, estShort: 25, shortBlocks: 2, hue: ['#0A84FF', '#30D158'],
+  id: 'F1', name: 'Full Body 1 · Squat + Bench Supersets', est: 48, estShort: 25, shortKeep: [2, 3], hue: ['#0A84FF', '#30D158'],
   blocks: [
-    [{ slot: 'F1a', ex: 'incline_bb', sets: [{ min: 5, max: 8, label: 'Top' }, { min: 8, max: 10, label: 'Back-off', pct: 0.88 }, { min: 8, max: 10, label: 'Back-off', pct: 0.88 }], tip: 'Bench at ~30°. Superset with pull-ups: press, rest ~60 s, pull, rest ~90 s.' },
-     { slot: 'F1b', ex: 'pullup_w', sets: S(3, 5, 8) }],
-    [{ slot: 'F1c', ex: 'cable_lateral', sets: S(4, 12, 20), tip: 'Slow 3-s lowering. Lead with the weaker arm.' }, { slot: 'F1d', ex: 'face_pull', sets: S(3, 12, 15) }],
-    [{ slot: 'F1e', ex: 'back_squat', sets: S(3, 5, 6) }],
-    [{ slot: 'F1f', ex: 'ez_curl', sets: S(3, 8, 12) }, { slot: 'F1g', ex: 'rope_pushdown', sets: S(3, 10, 15) }],
+    [{ slot: 'F1a', ex: 'back_squat', sets: S(3, 5, 6), tip: 'Straight sets, ~2.5 min rest. Then you are done with the rack.' }],
+    [{ slot: 'F1b', ex: 'incline_db', sets: S(3, 8, 12), tip: 'Station: one incline bench at ~30° + dumbbells. Press, then flip onto your chest and row.' },
+     { slot: 'F1c', ex: 'incline_db_row', sets: S(3, 8, 12) }],
+    [{ slot: 'F1d', ex: 'db_lateral', sets: S(4, 12, 20), tip: 'Same dumbbell area. Slow 3-s lowering, lead with the weaker arm.' }, { slot: 'F1e', ex: 'db_rear_fly', sets: S(3, 12, 15) }],
+    [{ slot: 'F1f', ex: 'db_curl', sets: S(3, 8, 12) }, { slot: 'F1g', ex: 'db_oh_ext', sets: S(3, 10, 15) }],
   ],
 };
 WORKOUTS.F2 = {
-  id: 'F2', name: 'Full Body 2 · Flat Press + Row + Deadlift', est: 50, estShort: 25, shortBlocks: 2, hue: ['#BF5AF2', '#FF9F0A'],
+  id: 'F2', name: 'Full Body 2 · Incline Bar + Pull-Up Bar + Cables', est: 48, estShort: 25, shortKeep: [1, 3], hue: ['#BF5AF2', '#FF9F0A'],
   blocks: [
-    [{ slot: 'F2a', ex: 'flat_db', sets: S(3, 6, 10), tip: 'Superset with rows: press, rest ~60 s, row, rest ~90 s.' }, { slot: 'F2b', ex: 'cs_row', sets: S(3, 8, 12) }],
-    [{ slot: 'F2c', ex: 'cable_lateral', sets: S(4, 12, 20), tip: 'Behind-the-body cable. Finish the last set with bottom-half partials.' }, { slot: 'F2d', ex: 'rear_delt_cable', sets: S(3, 12, 15) }],
-    [{ slot: 'F2e', ex: 'deadlift', sets: S(2, 5, 5), tip: 'Two crisp sets, 1–2 reps in reserve. Not a grinder.' }],
-    [{ slot: 'F2f', ex: 'incline_curl', sets: S(3, 10, 12) }, { slot: 'F2g', ex: 'oh_tri_ext', sets: S(3, 10, 15) }],
+    [{ slot: 'F2a', ex: 'incline_bb', sets: [{ min: 5, max: 8, label: 'Top' }, { min: 8, max: 10, label: 'Back-off', pct: 0.88 }, { min: 8, max: 10, label: 'Back-off', pct: 0.88 }], tip: 'Bench at ~30°. Straight sets, ~2.5 min rest.' }],
+    [{ slot: 'F2b', ex: 'pullup_w', sets: S(3, 5, 8), tip: 'Station: pull-up bar. Pull-up, then leg raises on the same bar.' }, { slot: 'F2c', ex: 'hanging_leg_raise', sets: S(3, 10, 15) }],
+    [{ slot: 'F2d', ex: 'cable_lateral', sets: S(4, 12, 20), tip: 'Station: cable crossover, low pulleys. Behind-the-body laterals.' }, { slot: 'F2e', ex: 'rear_delt_cable', sets: S(3, 12, 15) }],
+    [{ slot: 'F2f', ex: 'cable_fly_lth', sets: S(3, 12, 15), tip: 'Same crossover, pulleys stay low.' }, { slot: 'F2g', ex: 'bayesian_curl', sets: S(3, 10, 15) }],
   ],
 };
 WORKOUTS.F3 = {
-  id: 'F3', name: 'Full Body 3 · Incline DB + Pull-Up + Volume Squat', est: 50, estShort: 25, shortBlocks: 2, hue: ['#FF375F', '#64D2FF'],
+  id: 'F3', name: 'Full Body 3 · Deadlift + Bench Supersets + Cables', est: 48, estShort: 25, shortKeep: [3, 4], hue: ['#FF375F', '#64D2FF'],
   blocks: [
-    [{ slot: 'F3a', ex: 'incline_db', sets: S(3, 8, 12), tip: 'Bench at ~30°. Superset with neutral-grip pull-ups.' }, { slot: 'F3b', ex: 'neutral_pullup', sets: S(3, 6, 10) }],
-    [{ slot: 'F3c', ex: 'cable_lateral', sets: S(4, 12, 20) }, { slot: 'F3d', ex: 'cable_fly_lth', sets: S(3, 12, 15) }],
-    [{ slot: 'F3e', ex: 'back_squat', sets: S(3, 8, 10), extraAlts: ['bb_bulgarian'], tip: '~70% of your heavy-day weight' }],
-    [{ slot: 'F3f', ex: 'hanging_leg_raise', sets: S(3, 10, 15) }, { slot: 'F3g', ex: 'cable_crunch', sets: S(3, 10, 15) }],
+    [{ slot: 'F3a', ex: 'deadlift', sets: S(2, 5, 5), tip: 'Two crisp sets, 1–2 reps in reserve. Not a grinder.' }],
+    [{ slot: 'F3b', ex: 'neutral_pullup', sets: S(3, 6, 10), tip: 'Station: pull-up bar.' }, { slot: 'F3c', ex: 'hanging_leg_raise', sets: S(2, 10, 15) }],
+    [{ slot: 'F3d', ex: 'flat_db', sets: S(3, 6, 10), tip: 'Station: one flat bench + dumbbells. Press, then row on the same bench.' }, { slot: 'F3e', ex: 'sa_db_row', sets: S(3, 8, 12) }],
+    [{ slot: 'F3f', ex: 'cable_lateral', sets: S(4, 12, 20), tip: 'Station: cable crossover. Laterals low, triceps on the other side.' }, { slot: 'F3g', ex: 'oh_tri_ext', sets: S(3, 10, 15) }],
   ],
 };
 for (const id of ['A', 'B1', 'B2', 'C', 'D']) WORKOUTS[id].retired = true;
 
 export const BONUS = ['V'];
-export const PROGRAM = 'fb3-v1';
+export const PROGRAM = 'fb3-v2';
 export const ROTATION = ['F1', 'F2', 'F3'];
 // V is now a pure bonus (a 4th session on a good week); it never replaces a rotation slot.
 export const V_REPLACES = null;
@@ -202,9 +204,8 @@ export const SEED_SLOTS = {
   'B2a|back_squat': { w: 120, unit: 'lb' },
   'B1b|deadlift':   { w: 185, unit: 'lb' },
   'D1|flat_bb_bench': { w: 115, unit: 'lb' },
-  'F1e|back_squat': { w: 175, unit: 'lb' },
-  'F3e|back_squat': { w: 125, unit: 'lb' },
-  'F2e|deadlift':   { w: 185, unit: 'lb' },
+  'F1a|back_squat': { w: 175, unit: 'lb' },
+  'F3a|deadlift':   { w: 185, unit: 'lb' },
 };
 
 export const EQUIP_LABEL = { barbell: 'Barbell', dumbbell: 'Dumbbell', cable: 'Cable', machine: 'Machine', bodyweight: 'Bodyweight', smith: 'Smith' };

@@ -115,7 +115,7 @@ function renderHome(page) {
       h('div', { class: 'grow' }, h('div', { class: 'eyebrow' }, `Next up · ${d.nextIdx + 1} of ${ROTATION.length}`), h('h2', null, w.name), h('div', { class: 'muted small' }, est))),
     d.deload.active ? h('div', { class: 'pill warn' }, icon('moon', 14), ` Deload week · ${d.deload.remaining} sessions left`) : d.phase === 'intro' ? h('div', { class: 'pill' }, icon('bolt', 14), ' Ramp-up phase · leave 2–3 reps in the tank') : null,
     list,
-    h('div', { class: 'short-row' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Short on sleep?'), h('div', { class: 'muted small' }, 'Under 6 hours → just the first two supersets (press + pull, delts), ~25 min. Still counts.')),
+    h('div', { class: 'short-row' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Short on sleep?'), h('div', { class: 'muted small' }, 'Under 6 hours → skip the barbell lift, do the two key upper-body supersets, ~25 min. Still counts.')),
       toggle(short, (v) => { short = v; app.shortPref = v; drawList(); }, 'Short version')),
     h('button', { class: 'btn primary big', disabled: !!S.active, onclick: () => { unlockAudio(); haptic('medium'); startWorkout(wid, { short, planned: true }); } }, S.active ? 'Finish current workout first' : 'Start workout'),
     h('div', { class: 'hero-actions' },
