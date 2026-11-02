@@ -109,7 +109,7 @@ function weekly() {
   }
   const total = S.sessions.filter((s) => s.status === 'done').length;
   return h('section', { class: 'card' }, h('div', { class: 'row-between' }, h('div', { class: 'eyebrow' }, 'Sessions per week'), h('div', { class: 'muted tiny' }, `${total} total`)),
-    barChart(weeks, { target: 3, color: '#30D158', color2: '#B4FF5A', height: 110 }), h('div', { class: 'muted tiny' }, 'Dashed line = your 3-session minimum.'));
+    barChart(weeks, { target: 2, color: '#30D158', color2: '#B4FF5A', height: 110 }), h('div', { class: 'muted tiny' }, 'Dashed line = your 2-session minimum. 3+ is a good week.'));
 }
 
 function history(body) {

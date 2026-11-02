@@ -121,7 +121,6 @@ function dayView(body, k) {
       h('button', { class: 'pill tiny day-type ' + (train ? 'train' : ''), onclick: async () => { d.training = !train; await putNDay(d); haptic('light'); rerender(); } },
         (train ? 'Training day' : 'Rest day') + (d.training == null ? ' · auto' : ' · set'), ' ⇄')),
     h('button', { class: 'icon-btn', 'aria-label': 'Next day', disabled: k >= today(), onclick: () => { app.nutDay = shiftDay(k, 1); rerender(); } }, icon('chevron', 20))));
-  body.append(logCard(k));
   // Rings
   const kLeft = kt - tot.kcal;
   body.append(h('section', { class: 'card nut-rings' },
@@ -131,15 +130,9 @@ function dayView(body, k) {
       legend('#FF9F0A', 'Calories', kLeft >= 0 ? `${r0(kLeft)} left` : `${r0(-kLeft)} over`, `${train ? 'training' : 'rest'} target ${kt}` + (stepBonus(k) ? ` · incl. +${stepBonus(k)} for steps` : '')),
       legend('#30D158', 'Protein', `${r0(tot.p)} / ${tgt.protein} g`, tot.p >= tgt.protein ? 'target hit ✓' : tot.p >= tgt.proteinFloor ? `floor ${tgt.proteinFloor} g hit ✓` : `${r0(tgt.proteinFloor - tot.p)} g to the ${tgt.proteinFloor} g floor`),
       tot.missingKcal ? h('div', { class: 'muted tiny' }, `${tot.missingKcal} item${tot.missingKcal > 1 ? 's' : ''} logged without calories`) : null)));
-  body.append(h('section', { class: 'card macro-bars' },
-    macroBar('Protein', tot.p, tgt.protein, 'g', tgt.proteinFloor, '#30D158'),
-    macroBar('Fat', tot.f, tgt.fatMin, 'g', null, '#FFD60A', 'min'),
-    macroBar('Fiber', tot.fb, tgt.fiber, 'g', null, '#64D2FF'),
-    h('div', { class: 'row-between muted tiny' }, h('span', null, `Carbs ${r0(tot.c)} g`), tot.al ? h('span', null, `Alcohol ${r1(tot.al)} g · ${r0(tot.al * 7)} kcal`) : null)));
-  body.append(stepsCard(k));
   // Quick add + actions
   body.append(h('section', { class: 'card' },
-    h('div', { class: 'eyebrow' }, 'Other ways to log'),
+    h('div', { class: 'eyebrow' }, 'Quick log'),
     h('div', { class: 'quick-grid' },
       h('button', { class: 'qbtn press', onclick: () => quickAdd(k, 'p') }, h('b', null, '+ Protein'), h('span', { class: 'muted tiny' }, 'grams only')),
       h('button', { class: 'qbtn press', onclick: () => quickAdd(k, 'kcal') }, h('b', null, '+ Calories'), h('span', { class: 'muted tiny' }, 'kcal only')),
@@ -151,6 +144,13 @@ function dayView(body, k) {
       h('button', { class: 'abtn press', onclick: () => drinksSheet(k) }, icon('drop', 20), 'Drinks'),
       h('button', { class: 'abtn press', onclick: () => customFood(k) }, icon('edit', 20), 'Manual'),
       h('button', { class: 'abtn press', onclick: () => copyDay(shiftDay(k, -1), k) }, icon('swap', 20), 'Copy yesterday'))));
+  body.append(logCard(k));
+  body.append(stepsCard(k));
+  body.append(h('details', { class: 'card macro-bars' }, h('summary', { class: 'eyebrow' }, 'Fat · fiber · carbs'),
+    macroBar('Protein', tot.p, tgt.protein, 'g', tgt.proteinFloor, '#30D158'),
+    macroBar('Fat', tot.f, tgt.fatMin, 'g', null, '#FFD60A', 'min'),
+    macroBar('Fiber', tot.fb, tgt.fiber, 'g', null, '#64D2FF'),
+    h('div', { class: 'row-between muted tiny' }, h('span', null, `Carbs ${r0(tot.c)} g`), tot.al ? h('span', null, `Alcohol ${r1(tot.al)} g · ${r0(tot.al * 7)} kcal`) : null)));
   body.append(analyzeCard(k));
   // Meals
   const groups = GROUPS.map((m) => ({ ...m, items: d.entries.filter((e) => winOf(e) === m.value).sort((a, b) => a.t - b.t) })).filter((g) => g.items.length);
@@ -214,7 +214,7 @@ function stepsCard(k) {
         h('button', { class: 'btn small ghost', onclick: () => editSteps(k) }, n == null ? 'Add' : 'Edit'))),
     n != null ? h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill' + (low ? '' : ' green'), style: { width: Math.min(100, (n / 10000) * 100) + '%' } })) : null);
 }
-async function pasteSteps(k) {
+export async function pasteSteps(k) {
   let txt = '';
   try { txt = await navigator.clipboard.readText(); } catch { toast('Clipboard not available — tap Edit and type the number'); return; }
   let rows = parseSteps(txt);

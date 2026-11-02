@@ -28,7 +28,6 @@ export function renderTrain(page) {
   // Picker
   page.append(h('header', { class: 'large-head' }, h('div', null, h('div', { class: 'eyebrow' }, 'Rotation · ' + ROTATION.join(' → ')), h('h1', null, 'Train'))));
   const next = S.d.next;
-  page.append(vanityCard(next));
   page.append(h('div', { class: 'list cards' }, Object.values(WORKOUTS).filter((w) => !w.bonus && !w.retired).map((w) => {
     const n = w.blocks.flat();
     return h('button', { class: 'card wk-card press' + (w.id === next ? ' next' : ''), style: { '--h1': w.hue[0], '--h2': w.hue[1] }, onclick: () => { unlockAudio(); haptic('medium'); startWorkout(w.id, { short: !!app.shortPref, planned: w.id === next }); } },
@@ -39,6 +38,7 @@ export function renderTrain(page) {
       icon('chevron', 18));
   })));
   page.append(h('p', { class: 'muted small pad' }, 'Tap any workout to start it. Doing one out of order is fine — only the planned one advances the rotation.'));
+  page.append(vanityCard(next));
 }
 
 // Workout-level rest override (V: 60–90 s → 90 s everywhere, incl. the Smith press); otherwise the usual settings.

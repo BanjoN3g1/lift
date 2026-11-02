@@ -7,9 +7,9 @@ import { renderProgress } from './progress.js';
 import { renderBody } from './body.js';
 import { maybeOnboard } from './onboarding.js';
 import { activeDoneSets, discardActive } from './store.js';
-import { renderNutrition, targetsSheet } from './nutrition.js';
+import { renderNutrition, targetsSheet, pasteSteps } from './nutrition.js';
 import { aiSettingsSheet } from './ai.js';
-import { nTotals, kcalTarget, isTrainingDay, mealFor, nDay, putNDay, parseSteps, setSteps, LOW_STEPS } from './store.js';
+import { nTotals, kcalTarget, isTrainingDay, mealFor, nDay, putNDay, parseSteps, setSteps, LOW_STEPS, stepsFor, today } from './store.js';
 
 export const app = { tab: 'home', go, refresh: () => render(true) };
 window.__lift = { S, app };
@@ -88,6 +88,12 @@ function renderHome(page) {
     page.append(h('button', { class: 'card notice press', onclick: () => backupSheet() }, icon('upload', 22),
       h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Had workouts before? Restore them'),
         h('div', { class: 'muted small' }, 'This copy of the app is empty. Pick your latest lift-backup-….json from Files to bring your history and targets back.')), icon('chevron', 18)));
+  }
+  // Steps: one tap after the "Lift steps" Shortcut has copied the last 7 days from Apple Health.
+  if (stepsFor(today()) == null) {
+    page.append(h('button', { class: 'card notice press', onclick: async () => { await pasteSteps(today()); render(true); } }, icon('drop', 22),
+      h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Paste steps from Health'),
+        h('div', { class: 'muted small' }, 'Run your “Lift steps” Shortcut (or let its daily automation run), then tap here. Fills the last 7 days and adjusts today’s calories.')), icon('chevron', 18)));
   }
   // Hero: next workout
   const wid = d.next, w = WORKOUTS[wid];
@@ -302,6 +308,7 @@ async function boot() {
   const fromShortcut = await handleStepsHash();
   if (!fromShortcut) render();
   maybeOnboard();
+  try { const v = window.LIFT_VERSION, seen = localStorage.getItem('liftSeenVersion'); if (seen && seen !== v) toast(`Updated to v${v}`, { icon: 'check' }); localStorage.setItem('liftSeenVersion', v); } catch {}
   staleActiveCheck();
   window.addEventListener('hashchange', () => handleStepsHash());
   document.addEventListener('visibilitychange', () => { if (!document.hidden && app.tab === 'home') { derive(); render(true); } });
