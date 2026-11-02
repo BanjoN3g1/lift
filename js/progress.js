@@ -158,6 +158,6 @@ function logPast() {
   const d = new Date(Date.now() - E.DAY); d.setHours(8, 0, 0, 0);
   const dateIn = h('input', { class: 'input', type: 'datetime-local', value: E.localISO(d) });
   const s = sheet(h('div', { class: 'stack' }, h('label', { class: 'form-row' }, h('span', null, 'When'), dateIn),
-    h('div', { class: 'list' }, Object.values(WORKOUTS).map((w) => h('button', { class: 'row press', onclick: () => { s.close(); newPastSession(w.id, dateIn.value); } }, workoutBadge(w.id), h('div', { class: 'grow title-s' }, w.name), icon('chevron', 16)))),
+    h('div', { class: 'list' }, Object.values(WORKOUTS).filter((w) => !w.retired).map((w) => h('button', { class: 'row press', onclick: () => { s.close(); newPastSession(w.id, dateIn.value); } }, workoutBadge(w.id), h('div', { class: 'grow title-s' }, w.name), icon('chevron', 16)))),
     h('p', { class: 'muted tiny' }, 'Past workouts count toward progress and targets but don’t move the rotation.')), { title: 'Log a past workout' });
 }

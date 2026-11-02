@@ -1,6 +1,6 @@
 // Training math: units, e1RM (Epley, RIR-adjusted), plate math, warm-ups,
 // double progression, deloads, rotation. Pure functions where possible.
-import { EX, WORKOUTS, ROTATION, SEED_E1RM, SEED_SLOTS } from './data.js';
+import { EX, WORKOUTS, ROTATION, PROGRAM, SEED_E1RM, SEED_SLOTS } from './data.js';
 
 export const LB = 0.45359237;
 export const toKg = (w, u) => (u === 'kg' ? w : w * LB);
@@ -155,10 +155,11 @@ export function latestE1(hist, exId, bwKg) {
 }
 
 export function nextRotation(sessions, settings) {
-  const counted = sessions.filter((s) => (s.status === 'done' || s.status === 'skipped') && s.rotIndex != null).sort(byCreated);
+  // Only sessions from the current program move the pointer, so changing the program never scrambles it.
+  const counted = sessions.filter((s) => (s.status === 'done' || s.status === 'skipped') && s.rotIndex != null && s.prog === PROGRAM).sort(byCreated);
   const last = counted[counted.length - 1];
   const ov = settings.rotOverride;
-  if (ov && (!last || ov.at > (last.createdAt || 0))) return ov.index % ROTATION.length;
+  if (ov && ov.prog === PROGRAM && (!last || ov.at > (last.createdAt || 0))) return ov.index % ROTATION.length;
   return last ? (last.rotIndex + 1) % ROTATION.length : 0;
 }
 
@@ -175,10 +176,17 @@ export function targetsFor(item, exId, unit, ctx) {
   const st = states[key];
   const bwKg = toKg(settings.bodyweight || 0, settings.bodyweightUnit || 'lb');
   let w = null;
-  if (st && st.w != null && !isNoLoad(exId)) w = roundW(conv(st.w, st.unit || 'lb', unit), unit, ex.equip);
+  const seedOnly = st && st.status === 'seed';
+  const hasHist = !!hist[exId]?.length;
+  if (st && st.w != null && !isNoLoad(exId) && !(seedOnly && hasHist)) w = roundW(conv(st.w, st.unit || 'lb', unit), unit, ex.equip);
   else if (!isNoLoad(exId) && !isBW(exId)) {
+    // No history in this slot (new program, swapped exercise): carry over from the same lift anywhere else.
     const e1 = latestE1(hist, exId, bwKg);
-    if (e1 > 0 && (hist[exId]?.length)) w = roundW(fromKg(weightFor(e1, item.sets[0].max, rir[1]), unit), unit, ex.equip);
+    if (e1 > 0 && hasHist) w = roundW(fromKg(weightFor(e1, item.sets[0].max, rir[1]), unit), unit, ex.equip);
+  } else if (isBW(exId) && hasHist) {
+    // Pull-ups/dips: start from the added weight of the latest session.
+    const b = hist[exId][hist[exId].length - 1].best;
+    if (b) w = roundW(conv(b.w || 0, b.unit || 'lb', unit), unit, ex.equip);
   }
   let planned = item.sets.map((s, i) => ({ ...s, i }));
   if (phase === 'deload') planned = planned.slice(0, Math.max(1, Math.ceil(planned.length / 2)));
@@ -219,7 +227,7 @@ export function buildSession(workoutId, ctx, { short = false, planned = true, ro
   }
   const now = new Date();
   return { id: 's' + now.getTime().toString(36) + Math.random().toString(36).slice(2, 6), workout: workoutId, date: localISO(now), startedAt: now.getTime(),
-    status: 'active', short, deload: ctx.phase === 'deload', phase: ctx.phase, planned, rotIndex: planned ? rotIndex : null, entries };
+    status: 'active', short, deload: ctx.phase === 'deload', phase: ctx.phase, planned, rotIndex: planned ? rotIndex : null, prog: PROGRAM, entries };
 }
 
 export function localISO(d) {

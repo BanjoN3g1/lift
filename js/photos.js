@@ -211,7 +211,7 @@ function contextText() {
   const done = S.sessions.filter((x) => x.status === 'done');
   return `ABOUT SAL: 30-year-old man, 5'4" (163 cm), about 145 lb. Desk job (investment banking), often under 5k steps/day. Detrained from May 2026, restarted lifting recently. Previous lifts: squat/deadlift 225 lb × 5–6, bench 145 × 3–4.
 GOAL: a lean, athletic, aesthetic look (think Tom Holland), not bulky. Priorities: delts/shoulders, upper chest, arms, abs/obliques (the "Adonis belt" V-lines).
-TRAINING: rotating plan A, B1, C, D, A, B2, C, D (done in order), 45–60 min sessions, RIR-based double progression. ${done.length} sessions logged in the app${done.length ? `, last on ${done.map((x) => x.date.slice(0, 10)).sort().at(-1)}` : ''}.
+TRAINING: rotating full-body plan F1, F2, F3 (done in order, 2–3x/week), ~50 min sessions, RIR-based double progression. ${done.length} sessions logged in the app${done.length ? `, last on ${done.map((x) => x.date.slice(0, 10)).sort().at(-1)}` : ''}.
 ${rot}
 NUTRITION: recomp. Targets ${n.kcalTrain} kcal on training days / ${n.kcalRest} on rest days, protein ${n.protein} g (floor ${n.proteinFloor} g), fat ≥ ${n.fatMin} g, fiber ~${n.fiber} g. Tends to eat little during the day and a big dinner. ${wk}
 ${bw}`;

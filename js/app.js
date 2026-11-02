@@ -1,7 +1,7 @@
 import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, promptSheet, ring, segmented, toggle, confetti, unlockAudio } from './ui.js';
 import { S, load, derive, ctx, saveSettings, putSession, delSession, proteinTotal, proteinDay, addProtein, undoProtein, exportData, importData, eraseAll, U } from './store.js';
 import * as E from './engine.js';
-import { EX, WORKOUTS, ROTATION } from './data.js';
+import { EX, WORKOUTS, ROTATION, PROGRAM } from './data.js';
 import { renderTrain, startWorkout, openLogger, cancelWorkout } from './logger.js';
 import { renderProgress } from './progress.js';
 import { renderBody } from './body.js';
@@ -83,6 +83,12 @@ function renderHome(page) {
         h('button', { class: 'btn small danger-ghost', onclick: () => cancelWorkout() }, 'Discard'))));
   }
 
+  // Empty log: offer restore right away (e.g. after re-adding the app to the Home Screen).
+  if (!S.sessions.some((x) => x.status === 'done')) {
+    page.append(h('button', { class: 'card notice press', onclick: () => backupSheet() }, icon('upload', 22),
+      h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Had workouts before? Restore them'),
+        h('div', { class: 'muted small' }, 'This copy of the app is empty. Pick your latest lift-backup-….json from Files to bring your history and targets back.')), icon('chevron', 18)));
+  }
   // Hero: next workout
   const wid = d.next, w = WORKOUTS[wid];
   let short = !!app.shortPref;
@@ -109,7 +115,7 @@ function renderHome(page) {
       h('div', { class: 'grow' }, h('div', { class: 'eyebrow' }, `Next up · ${d.nextIdx + 1} of ${ROTATION.length}`), h('h2', null, w.name), h('div', { class: 'muted small' }, est))),
     d.deload.active ? h('div', { class: 'pill warn' }, icon('moon', 14), ` Deload week · ${d.deload.remaining} sessions left`) : d.phase === 'intro' ? h('div', { class: 'pill' }, icon('bolt', 14), ' Ramp-up phase · leave 2–3 reps in the tank') : null,
     list,
-    h('div', { class: 'short-row' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Short on sleep?'), h('div', { class: 'muted small' }, 'Under 5 hours → first two exercises only, ~25 min. Still counts.')),
+    h('div', { class: 'short-row' }, h('div', { class: 'grow' }, h('div', { class: 'title-s' }, 'Short on sleep?'), h('div', { class: 'muted small' }, 'Under 6 hours → just the first two supersets (press + pull, delts), ~25 min. Still counts.')),
       toggle(short, (v) => { short = v; app.shortPref = v; drawList(); }, 'Short version')),
     h('button', { class: 'btn primary big', disabled: !!S.active, onclick: () => { unlockAudio(); haptic('medium'); startWorkout(wid, { short, planned: true }); } }, S.active ? 'Finish current workout first' : 'Start workout'),
     h('div', { class: 'hero-actions' },
@@ -132,11 +138,11 @@ function renderHome(page) {
   // Week ring + protein side by side (stack on small)
   const wk = weekInfo();
   const week = h('section', { class: 'card week' },
-    ring(Math.min(1, wk.n / 3), { size: 112, stroke: 13, pct2: Math.min(1, wk.n / 4), colors: ['#30D158', '#B4FF5A'], colors2: ['#0A84FF', '#64D2FF'],
+    ring(Math.min(1, wk.n / 2), { size: 112, stroke: 13, pct2: Math.min(1, wk.n / 3), colors: ['#30D158', '#B4FF5A'], colors2: ['#0A84FF', '#64D2FF'],
       children: [h('div', { class: 'ring-num' }, String(wk.n)), h('div', { class: 'ring-sub' }, 'this week')] }),
     h('div', { class: 'grow' },
-      h('div', { class: 'title-s' }, wk.n >= 4 ? 'Great week 🔥' : wk.n >= 3 ? 'Minimum hit ✓' : `${3 - wk.n} to your minimum`),
-      h('div', { class: 'muted small' }, wk.n >= 4 ? 'Four or more sessions — that’s the good-week zone.' : 'Green ring: 3 sessions. Blue ring: 4+ for a good week.'),
+      h('div', { class: 'title-s' }, wk.n >= 3 ? 'Great week 🔥' : wk.n >= 2 ? 'Minimum hit ✓' : `${2 - wk.n} to your minimum`),
+      h('div', { class: 'muted small' }, wk.n >= 3 ? 'Three or more full-body sessions: every muscle trained 3x.' : 'Green ring: 2 sessions (the floor). Blue ring: 3+ for a good week.'),
       h('div', { class: 'days' }, ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((l, i) => h('div', { class: 'day' + (wk.days.has(i) ? ' on' : '') + (i === (now.getDay() + 6) % 7 ? ' today' : '') }, l)))));
   page.append(week);
   page.append(proteinCard());
@@ -144,10 +150,10 @@ function renderHome(page) {
   // Backup nudge
   const doneCount = S.sessions.filter((s) => s.status === 'done').length;
   const lb = S.settings.lastBackup;
-  if (doneCount >= 3 && (!lb || Date.now() - lb > 14 * E.DAY)) {
+  if (doneCount >= 1 && (!lb || Date.now() - lb > 7 * E.DAY)) {
     page.append(h('button', { class: 'card notice press', onclick: () => backupSheet() }, icon('lock', 22),
       h('div', { class: 'grow' }, h('div', { class: 'title-s' }, lb ? 'Back up your log' : 'Make your first backup'),
-        h('div', { class: 'muted small' }, 'Everything lives only on this phone. Save a backup file to Files or iCloud Drive now and then.')), icon('chevron', 18)));
+        h('div', { class: 'muted small' }, 'Your log lives only in this app on this phone. Deleting the Home Screen icon or opening the app from a different link starts it empty. Save a backup to iCloud Drive weekly.')), icon('chevron', 18)));
   }
   page.append(h('div', { class: 'foot muted small' }, icon('lock', 13), ' Stored only on this device · no account · no tracking'));
 }
@@ -161,13 +167,13 @@ export function isStandalone() { return matchMedia('(display-mode: standalone)')
 async function skipNext(wid) {
   const ok = await confirmSheet(`Skip ${wid}?`, `Moves the rotation to the next workout. Use this if you're deliberately dropping ${WORKOUTS[wid].name} this cycle. Missing a day doesn't need a skip — the rotation just waits for you.`, 'Skip it');
   if (!ok) return;
-  const s = { id: 'k' + Date.now().toString(36), workout: wid, date: E.localISO(new Date()), status: 'skipped', rotIndex: S.d.nextIdx, createdAt: Date.now(), entries: [] };
+  const s = { id: 'k' + Date.now().toString(36), workout: wid, date: E.localISO(new Date()), status: 'skipped', rotIndex: S.d.nextIdx, prog: PROGRAM, createdAt: Date.now(), entries: [] };
   await putSession(s); derive(); render(true); haptic('light');
   toast(`Skipped ${wid} · next is ${S.d.next}`, { icon: 'skip' });
 }
 
 function chooseWorkout() {
-  const s = sheet(h('div', { class: 'list' }, Object.values(WORKOUTS).map((w) => h('button', { class: 'row press', onclick: () => { s.close(); unlockAudio(); startWorkout(w.id, { short: !!app.shortPref, planned: w.id === S.d.next }); } },
+  const s = sheet(h('div', { class: 'list' }, Object.values(WORKOUTS).filter((w) => !w.retired).map((w) => h('button', { class: 'row press', onclick: () => { s.close(); unlockAudio(); startWorkout(w.id, { short: !!app.shortPref, planned: w.id === S.d.next }); } },
     workoutBadge(w.id), h('div', { class: 'grow' }, h('div', { class: 'title-s' }, w.name), h('div', { class: 'muted small' }, `~${w.est} min` + (w.id === S.d.next ? ' · next in rotation' : w.bonus ? ' · bonus, rotation unchanged' : ''))), icon('chevron', 18)))),
     { title: 'Pick a workout' });
   s.body.append(h('p', { class: 'muted small pad' }, 'Doing a different workout today doesn’t move the rotation — your next planned workout stays queued.'));
@@ -216,7 +222,7 @@ export function openSettings() {
     h('div', { class: 'group-title' }, 'Program'),
     h('div', { class: 'group' },
       h('div', { class: 'form-row' }, h('span', null, 'Phase'), h('span', { class: 'muted' }, d.phase === 'intro' ? 'Ramp-up (first 2 weeks)' : d.phase === 'deload' ? 'Deload' : 'Build')),
-      h('label', { class: 'form-row' }, h('span', null, 'Next workout'), h('select', { class: 'input', onchange: async (e) => { st.rotOverride = { index: +e.target.value, at: Date.now() }; await saveSettings(); derive(); app.refresh(); toast('Rotation updated'); } },
+      h('label', { class: 'form-row' }, h('span', null, 'Next workout'), h('select', { class: 'input', onchange: async (e) => { st.rotOverride = { index: +e.target.value, at: Date.now(), prog: PROGRAM }; await saveSettings(); derive(); app.refresh(); toast('Rotation updated'); } },
         ROTATION.map((r, i) => h('option', { value: i, selected: i === d.nextIdx }, `${i + 1}. ${r} · ${WORKOUTS[r].name}`)))),
       numRow('Deload every', 'deloadEvery', 'weeks', { def: 7 }),
       h('div', { class: 'form-row' }, h('span', null, 'Deload now'), toggle(!!st.deload?.active, async (v) => { st.deload = v ? { active: true, remaining: 4, lastEnd: st.deload?.lastEnd || null } : { active: false, remaining: 0, lastEnd: Date.now() }; await saveSettings(); derive(); app.refresh(); })),

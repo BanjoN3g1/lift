@@ -2,7 +2,7 @@ import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, segmented, confetti
 import { S, derive, ctx, saveSettings, putSession, delSession, saveActiveSoon, bwKg, dispKg, discardActive, activeDoneSets } from './store.js';
 import * as E from './engine.js';
 import { EX, WORKOUTS, EQUIP_LABEL, ROTATION, V_REPLACES } from './data.js';
-import { app, workoutBadge, weekInfo } from './app.js';
+import { app, workoutBadge, weekInfo, backupSheet } from './app.js';
 
 // The session being shown in the logger: S.active (live) or an edit copy of a past session.
 let L = null; // { s, mode: 'live'|'edit', root }
@@ -26,10 +26,10 @@ export function renderTrain(page) {
   if (app.editSession) { renderLogger(page, app.editSession.s, app.editSession.mode); return; }
   if (S.active) { renderLogger(page, S.active, 'live'); return; }
   // Picker
-  page.append(h('header', { class: 'large-head' }, h('div', null, h('div', { class: 'eyebrow' }, 'Rotation · A B1 C D A B2 C D'), h('h1', null, 'Train'))));
+  page.append(h('header', { class: 'large-head' }, h('div', null, h('div', { class: 'eyebrow' }, 'Rotation · ' + ROTATION.join(' → ')), h('h1', null, 'Train'))));
   const next = S.d.next;
   page.append(vanityCard(next));
-  page.append(h('div', { class: 'list cards' }, Object.values(WORKOUTS).filter((w) => !w.bonus).map((w) => {
+  page.append(h('div', { class: 'list cards' }, Object.values(WORKOUTS).filter((w) => !w.bonus && !w.retired).map((w) => {
     const n = w.blocks.flat();
     return h('button', { class: 'card wk-card press' + (w.id === next ? ' next' : ''), style: { '--h1': w.hue[0], '--h2': w.hue[1] }, onclick: () => { unlockAudio(); haptic('medium'); startWorkout(w.id, { short: !!app.shortPref, planned: w.id === next }); } },
       workoutBadge(w.id, 'lg'),
@@ -525,16 +525,17 @@ function showSummary(s, before) {
   const st = E.sessionStats(s, bwKg());
   const prs = s.entries.flatMap((e) => e.sets.filter((x) => x.pr && x.done).map(() => EX[e.ex].name));
   const wk = weekInfo();
-  if (prs.length || wk.n === 3 || wk.n === 4) setTimeout(() => confetti(), 300);
+  if (prs.length || wk.n === 2 || wk.n === 3) setTimeout(() => confetti(), 300);
   const mins = Math.round((s.duration || 0) / 60000);
   sheet(h('div', { class: 'summary' },
     h('div', { class: 'sum-hero' }, workoutBadge(s.workout, 'xl'), h('h2', null, 'Workout saved'), h('div', { class: 'muted' }, WORKOUTS[s.workout].name)),
     h('div', { class: 'stat-grid' },
       stat(`${mins}`, 'minutes'), stat(String(st.sets), 'sets'), stat(dispKg(st.vol), `${S.settings.unit} volume`), stat(String(wk.n), 'this week')),
     prs.length ? h('div', { class: 'pr-banner' }, icon('trophy', 20), ` ${prs.length} PR${prs.length > 1 ? 's' : ''}: ${[...new Set(prs)].join(', ')}`) : null,
-    wk.n === 3 ? h('div', { class: 'pr-banner green' }, '✓ Weekly minimum hit') : wk.n >= 4 ? h('div', { class: 'pr-banner green' }, '🔥 Good week — 4+ sessions') : null,
+    wk.n === 2 ? h('div', { class: 'pr-banner green' }, '✓ Weekly minimum hit') : wk.n >= 3 ? h('div', { class: 'pr-banner green' }, '🔥 Good week — 3+ sessions') : null,
     h('div', { class: 'group-title' }, 'Next time'), h('div', { class: 'list' }, nextChanges(s)),
-    h('div', { class: 'muted small pad' }, `Up next: ${S.d.next} · ${WORKOUTS[S.d.next].name}`)), { title: '' });
+    h('div', { class: 'muted small pad' }, `Up next: ${S.d.next} · ${WORKOUTS[S.d.next].name}`),
+    (!S.settings.lastBackup || Date.now() - S.settings.lastBackup > 3 * E.DAY) ? h('button', { class: 'btn ghost', onclick: () => backupSheet() }, icon('download', 16), ' Back up now (10 s)') : null), { title: '' });
 }
 const stat = (v, l) => h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, v), h('div', { class: 'stat-l muted tiny' }, l));
 

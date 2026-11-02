@@ -106,7 +106,15 @@ export function isTrainingDay(k) {
   if (d && d.training != null) return d.training;
   return S.sessions.some((s) => s.status === 'done' && s.date.slice(0, 10) === k);
 }
-export function kcalTarget(k) { const n = S.settings.nutrition; return isTrainingDay(k) ? n.kcalTrain : n.kcalRest; }
+// v1.8: the training/rest targets are the LOW-movement baseline (desk day, ~2–4k steps). Walking above
+// 4k steps earns ~35 kcal per 1,000 steps (145 lb body), capped at +500, so a 20k-step weekend day
+// gets fed and a 2k-step deal day doesn't. Protein never moves.
+export const STEP_BASE = 4000, KCAL_PER_1K_STEPS = 35, STEP_BONUS_CAP = 500;
+export function stepBonus(k) {
+  const n = stepsFor(k); if (n == null || n <= STEP_BASE) return 0;
+  return Math.min(STEP_BONUS_CAP, Math.round(((n - STEP_BASE) / 1000) * KCAL_PER_1K_STEPS / 10) * 10);
+}
+export function kcalTarget(k) { const n = S.settings.nutrition; return (isTrainingDay(k) ? n.kcalTrain : n.kcalRest) + stepBonus(k); }
 
 export async function saveSettings() { await db.put('kv', { k: 'settings', v: S.settings }); }
 export async function putSession(s) {

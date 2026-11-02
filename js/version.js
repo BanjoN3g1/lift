@@ -1,1 +1,1 @@
-window.LIFT_VERSION = '1.7.0';
+window.LIFT_VERSION = '1.8.0';

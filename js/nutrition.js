@@ -1,7 +1,7 @@
 // Nutrition tab: daily log, quick add, favorites, food search (bundled USDA FNDDS + optional Open Food Facts),
 // barcode scan, drinks, history. All logs stay in IndexedDB on this device.
 import { h, $, $$, icon, haptic, toast, sheet, confirmSheet, segmented, toggle, ring, barChart } from './ui.js';
-import { S, saveSettings, nDay, putNDay, nTotals, isTrainingDay, kcalTarget, mealFor, WINDOWS, winOf, today, U, stepsFor, setSteps, parseSteps, LOW_STEPS } from './store.js';
+import { S, saveSettings, nDay, putNDay, nTotals, isTrainingDay, kcalTarget, stepBonus, mealFor, WINDOWS, winOf, today, U, stepsFor, setSteps, parseSteps, LOW_STEPS } from './store.js';
 import * as E from './engine.js';
 import { app } from './app.js';
 import * as AI from './ai.js';
@@ -128,7 +128,7 @@ function dayView(body, k) {
     ring(Math.min(1, tot.kcal / kt), { size: 150, stroke: 15, colors: ['#FF9F0A', '#FF375F'], pct2: Math.min(1, tot.p / tgt.protein), colors2: ['#30D158', '#B4FF5A'],
       children: [h('div', { class: 'ring-num' }, String(r0(tot.kcal))), h('div', { class: 'ring-sub' }, `of ${kt} kcal`)] }),
     h('div', { class: 'grow nut-legend' },
-      legend('#FF9F0A', 'Calories', kLeft >= 0 ? `${r0(kLeft)} left` : `${r0(-kLeft)} over`, `${train ? 'training' : 'rest'} target ${kt}`),
+      legend('#FF9F0A', 'Calories', kLeft >= 0 ? `${r0(kLeft)} left` : `${r0(-kLeft)} over`, `${train ? 'training' : 'rest'} target ${kt}` + (stepBonus(k) ? ` · incl. +${stepBonus(k)} for steps` : '')),
       legend('#30D158', 'Protein', `${r0(tot.p)} / ${tgt.protein} g`, tot.p >= tgt.protein ? 'target hit ✓' : tot.p >= tgt.proteinFloor ? `floor ${tgt.proteinFloor} g hit ✓` : `${r0(tgt.proteinFloor - tot.p)} g to the ${tgt.proteinFloor} g floor`),
       tot.missingKcal ? h('div', { class: 'muted tiny' }, `${tot.missingKcal} item${tot.missingKcal > 1 ? 's' : ''} logged without calories`) : null)));
   body.append(h('section', { class: 'card macro-bars' },
@@ -208,7 +208,7 @@ function stepsCard(k) {
     h('div', { class: 'row-between' },
       h('div', null, h('div', { class: 'eyebrow' }, 'Steps'),
         h('div', { class: 'title-s' }, n == null ? 'Not synced' : fmtN(n), n != null ? h('span', { class: 'pill tiny ' + (low ? 'warn soft' : 'train') }, low ? 'low · <5k' : 'ok') : null),
-        h('div', { class: 'muted tiny' }, n == null ? 'Run the “Lift steps” Shortcut, paste, or type it' : (src === 'shortcut' ? 'from Apple Health via Shortcut' : src === 'paste' ? 'pasted from Shortcut' : 'entered by hand') + (low ? ' · low-movement day: lean toward the rest-day target' : ''))),
+        h('div', { class: 'muted tiny' }, n == null ? 'Run the “Lift steps” Shortcut, paste, or type it' : (src === 'shortcut' ? 'from Apple Health via Shortcut' : src === 'paste' ? 'pasted from Shortcut' : 'entered by hand') + (low ? ' · low-movement day: base target, no step bonus. Hit protein anyway.' : ''))),
       h('div', { class: 'row gap-s' },
         h('button', { class: 'btn small ghost', onclick: () => pasteSteps(k) }, 'Paste'),
         h('button', { class: 'btn small ghost', onclick: () => editSteps(k) }, n == null ? 'Add' : 'Edit'))),
